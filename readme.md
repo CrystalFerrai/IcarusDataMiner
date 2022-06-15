@@ -18,4 +18,4 @@ Clone the repository, including submodules.
 git clone --recursive https://github.com/CrystalFerrai/IcarusDataMiner.git
 ```
 
-You can then open and build Ue4Export.sln.
+You can then open and build IcarusDataMiner.sln.
