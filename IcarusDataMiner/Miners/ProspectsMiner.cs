@@ -35,7 +35,7 @@ namespace IcarusDataMiner.Miners
 		private ISet<string> GetActiveProspects(IProviderManager providerManager)
 		{
 			// For the sake of performance, this function uses a forward-only stream reader rather than
-			// fully loading the Jsona nd using random access.
+			// fully loading the Json and using random access.
 
 			HashSet<string> treeNames = new HashSet<string>()
 			{
@@ -257,7 +257,7 @@ namespace IcarusDataMiner.Miners
 							{
 								if (prospectData.IsValid())
 								{
-									string tier = prospectData.ID![..prospectData.ID.IndexOf('_')];
+									string tier = prospectData.ID![..prospectData.ID!.IndexOf('_')];
 
 									List<string>? list;
 									if (!prospectMap.TryGetValue(tier, out list))
