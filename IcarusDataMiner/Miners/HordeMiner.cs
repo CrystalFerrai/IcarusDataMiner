@@ -22,6 +22,9 @@ using System.Globalization;
 
 namespace IcarusDataMiner.Miners
 {
+	/// <summary>
+	/// Extracts information about horde spawns and rewards
+	/// </summary>
 	internal class HordeMiner : IDataMiner
 	{
 		// Notes
@@ -29,6 +32,9 @@ namespace IcarusDataMiner.Miners
 		// BP_Vapour_Condenser is the condenser actor which attaches to a geyser and handles giving out rewards.
 		// BPQC_HordeMode is a component attached to a condenser which manages hordes.
 		// BP_HordeSpawner is an actor spawned by BPQC_HordeMode to manage spawning horde creatures.
+
+		// For the sake of performance, Json reading functions in this class use a forward-only stream reader rather than
+		// fully loading the Json and using random access.
 
 		// The number of completions to calculate and export in the rewards tables
 		private const int NumRewardCompletions = 30;

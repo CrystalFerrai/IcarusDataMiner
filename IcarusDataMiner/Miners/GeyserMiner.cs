@@ -22,6 +22,9 @@ using System.Text.RegularExpressions;
 
 namespace IcarusDataMiner.Miners
 {
+	/// <summary>
+	/// Extracts geyser location information for all maps
+	/// </summary>
 	internal class GeyserMiner : IDataMiner
 	{
 		// To extract a geyser ID from a geyser name

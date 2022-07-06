@@ -1,7 +1,4 @@
-﻿using CUE4Parse.FileProvider;
-using CUE4Parse.UE4.Objects.Core.Math;
-using Newtonsoft.Json;
-using System.Text;
+﻿using CUE4Parse.UE4.Objects.Core.Math;
 
 namespace IcarusDataMiner
 {
