@@ -29,12 +29,14 @@ namespace IcarusDataMiner.Miners
 	{
 		// Notes
 		// BP_EnzymeGeyser is the geyser actor. Its base class, EnzymeGeyser, is in c++ where presumably the completion count is stored.
-		// BP_Vapour_Condenser is the condenser actor which attaches to a geyser and handles giving out rewards.
+		// BP_Vapour_Condenser is the condenser actor which attaches to a geyser. It tracks completions and handles giving out rewards.
 		// BPQC_HordeMode is a component attached to a condenser which manages hordes.
 		// BP_HordeSpawner is an actor spawned by BPQC_HordeMode to manage spawning horde creatures.
 
 		// For the sake of performance, Json reading functions in this class use a forward-only stream reader rather than
 		// fully loading the Json and using random access.
+
+		private const int NumCreatureCompletions = 10;
 
 		// The number of completions to calculate and export in the rewards tables
 		private const int NumRewardCompletions = 30;
@@ -640,242 +642,233 @@ namespace IcarusDataMiner.Miners
 			Done
 		}
 
-		private CreatureLevelMultipliers GetCreatureLevelMultipliers(IProviderManager providerManager, Logger logger)
+		private HordeMultipliers GetMultipliers(IProviderManager providerManager, Logger logger)
 		{
-			GameFile file = providerManager.AssetProvider.Files["Icarus/Content/BP/Quests/Components/BP_HordeSpawner.uasset"];
-			Package package = (Package)providerManager.AssetProvider.LoadPackage(file);
-
 			providerManager.AssetProvider.ReadScriptData = true;
 
-			IReadOnlyList<float>? difficultyMultipliers = null;
+			float? rewardsCompletionMultiplier = null, creaturesCompletionMultiplier = null;
+			IReadOnlyList<float>? rewardsDifficultyMultipliers = null, creaturesDifficultyMultipliers = null;
 
 			try
 			{
-				foreach (FObjectExport? export in package.ExportMap)
 				{
-					if (export == null) continue;
+					GameFile file = providerManager.AssetProvider.Files["Icarus/Content/BP/Objects/World/Items/Deployables/Communication/BP_Vapour_Condenser.uasset"];
+					Package package = (Package)providerManager.AssetProvider.LoadPackage(file);
 
-					if (export.ObjectName.Text.Equals("GetLevelForAI"))
+					HashSet<string> functionsToExport = new()
 					{
-						UFunction function = (UFunction)export.ExportObject.Value;
-						DisassembledFunction script = UFunctionDisassembler.Process(package, function);
-
-						Dictionary<string, float> floatVars = new();
-						Dictionary<string, float[]> switchResultVars = new();
-
-						foreach (Operation op in script.Script)
-						{
-							if (op.OpCode != EExprToken.Let) continue;
-
-							if (op.ChildOperations[1].OpCode == EExprToken.FloatConst)
-							{
-								string? varName = ((Operation<MemberReference?>)op.ChildOperations[0]).Operand?.MemberName;
-								if (varName == null) continue;
-								floatVars[varName] = ((Operation<float>)op.ChildOperations[1]).Operand;
-								continue;
-							}
-
-							if (op.ChildOperations[1].OpCode == EExprToken.CallMath)
-							{
-								Operation<string?> expression = (Operation<string?>)op.ChildOperations[1];
-								if (expression.Operand?.Equals("KismetMathLibrary::Multiply_FloatFloat") ?? false &&
-									expression.ChildOperations[0].OpCode == EExprToken.LocalVariable &&
-									expression.ChildOperations[1].OpCode == EExprToken.SwitchValue)
-								{
-									string? varName = ((Operation<MemberReference?>)op.ChildOperations[0]).Operand?.MemberName;
-									if (varName == null) continue;
-
-									bool casesValid = true;
-									SwitchOperand switchOperand = ((Operation<SwitchOperand>)expression.ChildOperations[1]).Operand;
-									float[] switchResults = new float[switchOperand.Cases.Count];
-									for (int i = 0; i < switchOperand.Cases.Count; ++i)
-									{
-										Operation<MemberReference?>? resultOp = switchOperand.Cases[i].Result as Operation<MemberReference?>;
-										if (resultOp == null || resultOp.Operand == null)
-										{
-											casesValid = false;
-											break;
-										}
-
-										float switchResult;
-										if (!floatVars.TryGetValue(resultOp.Operand.MemberName!, out switchResult))
-										{
-											throw new DataMinerException($"Expected to find a local float variable named {resultOp.Operand}");
-										}
-
-										switchResults[i] = switchResult;
-									}
-
-									if (!casesValid) continue;
-
-									switchResultVars[varName] = switchResults;
-								}
-								else if (expression.Operand?.Equals("KismetMathLibrary::FCeil") ?? false &&
-									expression.ChildOperations[2].OpCode == EExprToken.LocalVariable)
-								{
-									string varName = ((Operation<MemberReference?>)expression.ChildOperations[0]).Operand!.MemberName!;
-									difficultyMultipliers = switchResultVars[varName];
-									break;
-								}
-							}
-						}
-
-						if (difficultyMultipliers == null)
-						{
-							throw new DataMinerException("Unexpected implementation of BP_Vapour_Condenser::GrantRewards");
-						}
-					}
-				}
-			}
-			finally
-			{
-				providerManager.AssetProvider.ReadScriptData = false;
-			}
-
-			if (difficultyMultipliers == null) throw new DataMinerException("Could not locate function BP_HordeSpawner::GetLevelForAI");
-
-			return new CreatureLevelMultipliers(difficultyMultipliers);
-		}
-
-		private RewardMultipliers GetRewardMultipliers(IProviderManager providerManager, Logger logger)
-		{
-			GameFile file = providerManager.AssetProvider.Files["Icarus/Content/BP/Objects/World/Items/Deployables/Communication/BP_Vapour_Condenser.uasset"];
-			Package package = (Package)providerManager.AssetProvider.LoadPackage(file);
-
-			providerManager.AssetProvider.ReadScriptData = true;
-
-			float? completionMultiplier = null;
-			IReadOnlyList<float>? difficultyMultipliers = null;
-
-			try
-			{
-				HashSet<string> functionsToExport = new()
-				{
-					"GetMultiplierFromCompletions",
-					"GrantRewards"
-				};
-				foreach (FObjectExport? export in package.ExportMap)
-				{
-					if (export == null) continue;
-
-					if (functionsToExport.Contains(export.ObjectName.Text))
+						"GetMultiplierFromCompletions",
+						"GetCreatureMultiplierFromCompletions",
+						"GrantRewards"
+					};
+					foreach (FObjectExport? export in package.ExportMap)
 					{
-						UFunction function = (UFunction)export.ExportObject.Value;
-						DisassembledFunction script = UFunctionDisassembler.Process(package, function);
+						if (export == null) continue;
 
-						switch (export.ObjectName.Text)
+						if (functionsToExport.Contains(export.ObjectName.Text))
 						{
-							case "GetMultiplierFromCompletions":
+							UFunction function = (UFunction)export.ExportObject.Value;
+							DisassembledFunction script = UFunctionDisassembler.Process(package, function);
+
+							Func<string, float> processMultiplierScript = new((funcName) =>
+							{
+								foreach (Operation op in script.Script)
 								{
-									foreach (Operation op in script.Script)
+									if (op.OpCode != EExprToken.Let ||
+										op.ChildOperations[0].OpCode != EExprToken.LocalVariable ||
+										op.ChildOperations[1].OpCode != EExprToken.CallMath)
 									{
-										if (op.OpCode != EExprToken.Let ||
-											op.ChildOperations[0].OpCode != EExprToken.LocalVariable ||
-											op.ChildOperations[1].OpCode != EExprToken.CallMath)
-										{
-											continue;
-										}
-
-										Operation<string?> expression = (Operation<string?>)op.ChildOperations[1];
-										if (!(expression.Operand?.Equals("KismetMathLibrary::Multiply_IntFloat") ?? false) ||
-											expression.ChildOperations[0].OpCode != EExprToken.LocalVariable ||
-											expression.ChildOperations[1].OpCode != EExprToken.FloatConst)
-										{
-											continue;
-										}
-
-										Operation<MemberReference?> intParam = (Operation<MemberReference?>)expression.ChildOperations[0];
-										if (!(intParam.Operand?.MemberName?.Equals("Completions") ?? false))
-										{
-											continue;
-										}
-
-										Operation<float> floatParam = (Operation<float>)expression.ChildOperations[1];
-										completionMultiplier = floatParam.Operand;
-
-										break;
+										continue;
 									}
 
-									if (!completionMultiplier.HasValue)
+									Operation<string?> expression = (Operation<string?>)op.ChildOperations[1];
+									if (!(expression.Operand?.Equals("KismetMathLibrary::Multiply_IntFloat") ?? false) ||
+										expression.ChildOperations[0].OpCode != EExprToken.LocalVariable ||
+										expression.ChildOperations[1].OpCode != EExprToken.FloatConst)
 									{
-										throw new DataMinerException("Unexpected implementation of BP_Vapour_Condenser::GetMultiplierFromCompletions");
+										continue;
 									}
 
-									break;
+									Operation<MemberReference?> intParam = (Operation<MemberReference?>)expression.ChildOperations[0];
+									if (!(intParam.Operand?.MemberName?.Equals("Completions") ?? false))
+									{
+										continue;
+									}
+
+									Operation<float> floatParam = (Operation<float>)expression.ChildOperations[1];
+									return floatParam.Operand;
 								}
-							case "GrantRewards":
-								{
-									Dictionary<string, float> floatVars = new();
-									Dictionary<string, float[]> switchResultVars = new();
+								throw new DataMinerException($"Unexpected implementation of BP_Vapour_Condenser::{funcName}");
+							});
 
-									foreach (Operation op in script.Script)
+							switch (export.ObjectName.Text)
+							{
+								case "GetMultiplierFromCompletions":
+									rewardsCompletionMultiplier = processMultiplierScript(export.ObjectName.Text);
+									break;
+								case "GetCreatureMultiplierFromCompletions":
+									creaturesCompletionMultiplier = processMultiplierScript(export.ObjectName.Text);
+									break;
+								case "GrantRewards":
 									{
-										if (op.OpCode != EExprToken.Let) continue;
+										Dictionary<string, float> floatVars = new();
+										Dictionary<string, float[]> switchResultVars = new();
 
-										if (op.ChildOperations[1].OpCode == EExprToken.FloatConst)
+										foreach (Operation op in script.Script)
 										{
-											string? varName = ((Operation<MemberReference?>)op.ChildOperations[0]).Operand?.MemberName;
-											if (varName == null) continue;
-											floatVars[varName] = ((Operation<float>)op.ChildOperations[1]).Operand;
-											continue;
-										}
+											if (op.OpCode != EExprToken.Let) continue;
 
-										if (op.ChildOperations[1].OpCode == EExprToken.CallMath)
-										{
-											Operation<string?> expression = (Operation<string?>)op.ChildOperations[1];
-											if (expression.Operand?.Equals("KismetMathLibrary::Multiply_FloatFloat") ?? false &&
-												expression.ChildOperations[0].OpCode == EExprToken.LocalVariable &&
-												expression.ChildOperations[1].OpCode == EExprToken.SwitchValue)
+											if (op.ChildOperations[1].OpCode == EExprToken.FloatConst)
 											{
 												string? varName = ((Operation<MemberReference?>)op.ChildOperations[0]).Operand?.MemberName;
 												if (varName == null) continue;
-
-												bool casesValid = true;
-												SwitchOperand switchOperand = ((Operation<SwitchOperand>)expression.ChildOperations[1]).Operand;
-												float[] switchResults = new float[switchOperand.Cases.Count];
-												for (int i = 0; i < switchOperand.Cases.Count; ++i)
-												{
-													Operation<MemberReference?>? resultOp = switchOperand.Cases[i].Result as Operation<MemberReference?>;
-													if (resultOp == null || resultOp.Operand == null)
-													{
-														casesValid = false;
-														break;
-													}
-
-													float switchResult;
-													if (!floatVars.TryGetValue(resultOp.Operand.MemberName!, out switchResult))
-													{
-														throw new DataMinerException($"Expected to find a local float variable named {resultOp.Operand}");
-													}
-
-													switchResults[i] = switchResult;
-												}
-
-												if (!casesValid) continue;
-
-												switchResultVars[varName] = switchResults;
+												floatVars[varName] = ((Operation<float>)op.ChildOperations[1]).Operand;
+												continue;
 											}
-											else if (expression.Operand?.Equals("InventoryItemLibrary::GenerateRewardStackSize") ?? false &&
-												expression.ChildOperations[2].OpCode == EExprToken.LocalVariable)
+
+											if (op.ChildOperations[1].OpCode == EExprToken.CallMath)
 											{
-												string varName = ((Operation<MemberReference?>)expression.ChildOperations[2]).Operand!.MemberName!;
-												difficultyMultipliers = switchResultVars[varName];
-												break;
+												Operation<string?> expression = (Operation<string?>)op.ChildOperations[1];
+												if (expression.Operand?.Equals("KismetMathLibrary::Multiply_FloatFloat") ?? false &&
+													expression.ChildOperations[0].OpCode == EExprToken.LocalVariable &&
+													expression.ChildOperations[1].OpCode == EExprToken.SwitchValue)
+												{
+													string? varName = ((Operation<MemberReference?>)op.ChildOperations[0]).Operand?.MemberName;
+													if (varName == null) continue;
+
+													bool casesValid = true;
+													SwitchOperand switchOperand = ((Operation<SwitchOperand>)expression.ChildOperations[1]).Operand;
+													float[] switchResults = new float[switchOperand.Cases.Count];
+													for (int i = 0; i < switchOperand.Cases.Count; ++i)
+													{
+														Operation<MemberReference?>? resultOp = switchOperand.Cases[i].Result as Operation<MemberReference?>;
+														if (resultOp == null || resultOp.Operand == null)
+														{
+															casesValid = false;
+															break;
+														}
+
+														float switchResult;
+														if (!floatVars.TryGetValue(resultOp.Operand.MemberName!, out switchResult))
+														{
+															throw new DataMinerException($"Expected to find a local float variable named {resultOp.Operand}");
+														}
+
+														switchResults[i] = switchResult;
+													}
+
+													if (!casesValid) continue;
+
+													switchResultVars[varName] = switchResults;
+												}
+												else if (expression.Operand?.Equals("InventoryItemLibrary::GenerateRewardStackSize") ?? false &&
+													expression.ChildOperations[2].OpCode == EExprToken.LocalVariable)
+												{
+													string varName = ((Operation<MemberReference?>)expression.ChildOperations[2]).Operand!.MemberName!;
+													rewardsDifficultyMultipliers = switchResultVars[varName];
+													break;
+												}
 											}
 										}
-									}
 
-									if (difficultyMultipliers == null)
-									{
-										throw new DataMinerException("Unexpected implementation of BP_Vapour_Condenser::GrantRewards");
-									}
+										if (rewardsDifficultyMultipliers == null)
+										{
+											throw new DataMinerException("Unexpected implementation of BP_Vapour_Condenser::GrantRewards");
+										}
 
-									break;
-								}
+										break;
+									}
+							}
 						}
+
+						if (rewardsCompletionMultiplier.HasValue && creaturesCompletionMultiplier.HasValue && rewardsDifficultyMultipliers != null) break;
 					}
 
-					if (completionMultiplier.HasValue && difficultyMultipliers != null) break;
+					if (!rewardsCompletionMultiplier.HasValue) throw new DataMinerException("Could not locate function BP_Vapour_Condenser::GetMultiplierFromCompletions");
+					if (!creaturesCompletionMultiplier.HasValue) throw new DataMinerException("Could not locate function BP_Vapour_Condenser::GetCreatureMultiplierFromCompletions");
+					if (rewardsDifficultyMultipliers == null) throw new DataMinerException("Could not locate function BP_Vapour_Condenser::GrantRewards");
+				}
+
+				{
+					GameFile file = providerManager.AssetProvider.Files["Icarus/Content/BP/Quests/Components/BP_HordeSpawner.uasset"];
+					Package package = (Package)providerManager.AssetProvider.LoadPackage(file);
+
+					foreach (FObjectExport? export in package.ExportMap)
+					{
+						if (export == null) continue;
+
+						if (export.ObjectName.Text.Equals("GetLevelForAI"))
+						{
+							UFunction function = (UFunction)export.ExportObject.Value;
+							DisassembledFunction script = UFunctionDisassembler.Process(package, function);
+
+							Dictionary<string, float> floatVars = new();
+							Dictionary<string, float[]> switchResultVars = new();
+
+							foreach (Operation op in script.Script)
+							{
+								if (op.OpCode != EExprToken.Let) continue;
+
+								if (op.ChildOperations[1].OpCode == EExprToken.FloatConst)
+								{
+									string? varName = ((Operation<MemberReference?>)op.ChildOperations[0]).Operand?.MemberName;
+									if (varName == null) continue;
+									floatVars[varName] = ((Operation<float>)op.ChildOperations[1]).Operand;
+									continue;
+								}
+
+								if (op.ChildOperations[1].OpCode == EExprToken.CallMath)
+								{
+									Operation<string?> expression = (Operation<string?>)op.ChildOperations[1];
+									if (expression.Operand?.Equals("KismetMathLibrary::Multiply_FloatFloat") ?? false &&
+										expression.ChildOperations[0].OpCode == EExprToken.LocalVariable &&
+										expression.ChildOperations[1].OpCode == EExprToken.SwitchValue)
+									{
+										string? varName = ((Operation<MemberReference?>)op.ChildOperations[0]).Operand?.MemberName;
+										if (varName == null) continue;
+
+										bool casesValid = true;
+										SwitchOperand switchOperand = ((Operation<SwitchOperand>)expression.ChildOperations[1]).Operand;
+										float[] switchResults = new float[switchOperand.Cases.Count];
+										for (int i = 0; i < switchOperand.Cases.Count; ++i)
+										{
+											Operation<MemberReference?>? resultOp = switchOperand.Cases[i].Result as Operation<MemberReference?>;
+											if (resultOp == null || resultOp.Operand == null)
+											{
+												casesValid = false;
+												break;
+											}
+
+											float switchResult;
+											if (!floatVars.TryGetValue(resultOp.Operand.MemberName!, out switchResult))
+											{
+												throw new DataMinerException($"Expected to find a local float variable named {resultOp.Operand}");
+											}
+
+											switchResults[i] = switchResult;
+										}
+
+										if (!casesValid) continue;
+
+										switchResultVars[varName] = switchResults;
+									}
+									else if (expression.Operand?.Equals("KismetMathLibrary::FCeil") ?? false &&
+										expression.ChildOperations[2].OpCode == EExprToken.LocalVariable)
+									{
+										string varName = ((Operation<MemberReference?>)expression.ChildOperations[0]).Operand!.MemberName!;
+										creaturesDifficultyMultipliers = switchResultVars[varName];
+										break;
+									}
+								}
+							}
+
+							if (creaturesDifficultyMultipliers == null)
+							{
+								throw new DataMinerException("Unexpected implementation of BP_HordeSpawner::GetLevelForAI");
+							}
+						}
+					}
+					if (creaturesDifficultyMultipliers == null) throw new DataMinerException("Could not locate function BP_HordeSpawner::GetLevelForAI");
 				}
 			}
 			finally
@@ -883,17 +876,15 @@ namespace IcarusDataMiner.Miners
 				providerManager.AssetProvider.ReadScriptData = false;
 			}
 
-			if (!completionMultiplier.HasValue) throw new DataMinerException("Could not locate function BP_Vapour_Condenser::GetMultiplierFromCompletions");
-			if (difficultyMultipliers == null) throw new DataMinerException("Could not locate function BP_Vapour_Condenser::GrantRewards");
-
-			return new RewardMultipliers(completionMultiplier.Value, difficultyMultipliers);
+			return new HordeMultipliers(
+				new MultiplierData(creaturesCompletionMultiplier.Value, creaturesDifficultyMultipliers),
+				new MultiplierData(rewardsCompletionMultiplier.Value, rewardsDifficultyMultipliers));
 		}
 
 		private void ExportHordeData(IProviderManager providerManager, Config config, Logger logger)
 		{
 			IReadOnlyList<HordeData> hordes = GetHordes(providerManager, logger);
-			CreatureLevelMultipliers creatureMultipliers = GetCreatureLevelMultipliers(providerManager, logger);
-			RewardMultipliers rewardMultipliers = GetRewardMultipliers(providerManager, logger);
+			HordeMultipliers multipliers = GetMultipliers(providerManager, logger);
 
 			Func<HordeData, string> getDisplayName = new(horde =>
 				horde.Name.StartsWith("Horde_")	? horde.Name["Horde_".Length..]
@@ -909,7 +900,12 @@ namespace IcarusDataMiner.Miners
 				using (FileStream outStream = IOUtil.CreateFile(outputPath, logger))
 				using (StreamWriter writer = new StreamWriter(outStream))
 				{
-					writer.WriteLine("Horde,Wave,Creatures,Level,Total Count,Extra,Initial Delay,Spawn Amount,Spawn Interval");
+					writer.Write("Horde,Wave,Creatures,Total Count,Extra,Initial Delay,Spawn Amount,Spawn Interval");
+					for (int c = 0; c < NumCreatureCompletions; ++c)
+					{
+						writer.Write($",Level {c+1}");
+					}
+					writer.WriteLine();
 
 					foreach(HordeData horde in hordes)
 					{
@@ -918,10 +914,15 @@ namespace IcarusDataMiner.Miners
 							HordeWaveData wave = horde.Waves[waveNumber];
 							foreach (HordeCreatureData creature in wave.Creatures)
 							{
-								// Note: Creature level is rounded up after applying multiplier (see FCeil call in BP_HordeSpawner::GetLevelForAI)
-								int level = (int)Math.Ceiling(creature.Level * creatureMultipliers.DifficultyMultipliers[difficultyIndex]);
+								writer.Write($"{getDisplayName(horde)},{waveNumber + 1},{creature.Name},{creature.SpawnTotal},{creature.ExtraTotalPerPlayer},{creature.InitialDelay},{creature.SpawnAmount.ToExcelSafeString()},{creature.SpawnInterval.ToExcelSafeString()}");
 
-								writer.WriteLine($"{getDisplayName(horde)},{waveNumber + 1},{creature.Name},{level},{creature.SpawnTotal},{creature.ExtraTotalPerPlayer},{creature.InitialDelay},{creature.SpawnAmount.ToExcelSafeString()},{creature.SpawnInterval.ToExcelSafeString()}");//,{horde.CompletionsBeforeInert}");
+								for (int c = 0; c < NumCreatureCompletions; ++c)
+								{
+									// Note: Creature level is rounded up after applying multiplier (see FCeil call in BP_HordeSpawner::GetLevelForAI)
+									int level = (int)Math.Ceiling(creature.Level * (1.0f + c * multipliers.CreatureMultipliers.CompletionMultiplier) * multipliers.CreatureMultipliers.DifficultyMultipliers[difficultyIndex]);
+									writer.Write($",{level}");
+								}
+								writer.WriteLine();
 							}
 						}
 					}
@@ -944,7 +945,7 @@ namespace IcarusDataMiner.Miners
 						{
 							writer.Write($"{getDisplayName(horde)},{completions + 1}");
 
-							float multiplier = (1.0f + completions * rewardMultipliers.CompletionMultiplier) * rewardMultipliers.DifficultyMultipliers[difficultyIndex];
+							float multiplier = (1.0f + completions * multipliers.RewardMultipliers.CompletionMultiplier) * multipliers.RewardMultipliers.DifficultyMultipliers[difficultyIndex];
 
 							Action<string?[], IList<RewardData>> writeRewards = new((names, data) =>
 							{
@@ -1109,16 +1110,6 @@ namespace IcarusDataMiner.Miners
 			}
 		}
 
-		private class CreatureLevelMultipliers
-		{
-			public IReadOnlyList<float> DifficultyMultipliers { get; }
-
-			public CreatureLevelMultipliers(IReadOnlyList<float> difficultyMultipliers)
-			{
-				DifficultyMultipliers = difficultyMultipliers;
-			}
-		}
-
 		private class RewardData
 		{
 			public string? Item { get; set; }
@@ -1138,13 +1129,26 @@ namespace IcarusDataMiner.Miners
 			}
 		}
 
-		private class RewardMultipliers
+		private class HordeMultipliers
+		{
+			public MultiplierData CreatureMultipliers { get; }
+
+			public MultiplierData RewardMultipliers { get; }
+
+			public HordeMultipliers(MultiplierData creatureMultipliers, MultiplierData rewardMultipliers)
+			{
+				CreatureMultipliers = creatureMultipliers;
+				RewardMultipliers = rewardMultipliers;
+			}
+		}
+
+		private class MultiplierData
 		{
 			public float CompletionMultiplier { get; }
 
 			public IReadOnlyList<float> DifficultyMultipliers { get; }
 
-			public RewardMultipliers(float completionMultiplier, IReadOnlyList<float> difficultyMultipliers)
+			public MultiplierData(float completionMultiplier, IReadOnlyList<float> difficultyMultipliers)
 			{
 				CompletionMultiplier = completionMultiplier;
 				DifficultyMultipliers = difficultyMultipliers;
