@@ -246,7 +246,10 @@ namespace IcarusDataMiner.Miners
 					}
 				}
 			}
-			if (orderedTemplates == null) throw new DataMinerException($"Could not locate array CaveLocations in map {mapAsset.NameWithoutExtension}");
+			if (orderedTemplates == null)
+			{
+				logger.Log(LogLevel.Information, $"Could not locate array CaveLocations in map {mapAsset.NameWithoutExtension}. If any template caves are present, their details will be missing from the output.");
+			}
 
 			// Build lists of caves by searching all generated sublevels for the map
 			List<CaveData> templateCaves = new List<CaveData>();
@@ -348,8 +351,10 @@ namespace IcarusDataMiner.Miners
 			}
 		}
 
-		private IEnumerable<CaveData> FindCaves(GameFile mapAsset, IReadOnlyList<CaveTemplate> orderedTemplates, IProviderManager providerManager, Config config, Logger logger)
+		private IEnumerable<CaveData> FindCaves(GameFile mapAsset, IReadOnlyList<CaveTemplate>? orderedTemplates, IProviderManager providerManager, Config config, Logger logger)
 		{
+			CaveTemplate defaultTemplate = new CaveTemplate() { Name = "Unknown" };
+
 			Package mapPackage = (Package)providerManager.AssetProvider.LoadPackage(mapAsset);
 
 			int templateCaveTypeNameIndex = -1, customCaveTypeNameIndex = -1, caveEntranceNameIndex = -1, instanceComponentsIndex = -1, entrancesIndex = -1, entranceRefsIndex = -1, rootComponentIndex = -1, relativeLocationIndex = -1, relativeRotationIndex = -1, attachParentIndex = -1;
@@ -459,7 +464,7 @@ namespace IcarusDataMiner.Miners
 				if (export.ClassIndex.Index == templateCaveTypeIndex)
 				{
 					entranceNameIndex = entrancesIndex;
-					caveData.Template = orderedTemplates[caveData.ID];
+					caveData.Template = orderedTemplates?[caveData.ID] ?? defaultTemplate;
 				}
 				else
 				{
