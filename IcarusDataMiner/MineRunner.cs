@@ -113,6 +113,7 @@ namespace IcarusDataMiner
 		private void CreateMiners(IEnumerable<string>? minersToInclude)
 		{
 			HashSet<string>? includeMiners = minersToInclude == null ? null : new HashSet<string>(minersToInclude.Select(m => m.ToLowerInvariant()));
+			bool forceInclude = includeMiners?.Contains("all") ?? false;
 
 			Type minerInterface = typeof(IDataMiner);
 
@@ -121,6 +122,15 @@ namespace IcarusDataMiner
 			{
 				if (!type.IsAbstract && minerInterface.IsAssignableFrom(type))
 				{
+					if (includeMiners == null)
+					{
+						DefaultEnabledAttribute? defaultEnabledAttribute = type.GetCustomAttribute<DefaultEnabledAttribute>();
+						if (!(defaultEnabledAttribute?.IsEnabled ?? true))
+						{
+							continue;
+						}
+					}
+
 					IDataMiner? miner;
 					try
 					{
@@ -137,7 +147,7 @@ namespace IcarusDataMiner
 						continue;
 					}
 					string name = miner.Name.ToLowerInvariant();
-					if (includeMiners?.Contains(name) ?? true)
+					if (forceInclude || (includeMiners?.Contains(name) ?? true))
 					{
 						includeMiners?.Remove(name);
 						mMiners.Add(miner);

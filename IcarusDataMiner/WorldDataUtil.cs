@@ -109,8 +109,8 @@ namespace IcarusDataMiner
 
 		public List<string> HeightMapTextures { get; } = new List<string>();
 
-		public FVector WorldBoundaryMin { get; set; }
+		public FVector2D WorldBoundaryMin { get; set; }
 
-		public FVector WorldBoundaryMax { get; set; }
+		public FVector2D WorldBoundaryMax { get; set; }
 	}
 }

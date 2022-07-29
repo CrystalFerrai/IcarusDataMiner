@@ -34,4 +34,21 @@ namespace IcarusDataMiner
 		/// <returns>Whether the miner was successful (true) or encountered errors (false)</returns>
 		bool Run(IProviderManager providerManager, Config config, Logger logger);
 	}
+
+	/// <summary>
+	/// Indicates whether a data miner should be run when no filter has been applied.
+	/// </summary>
+	/// <remarks>
+	/// If this attribute is not present, the data miner will be enabled by default.
+	/// </remarks>
+	[AttributeUsage(AttributeTargets.Class)]
+	internal class DefaultEnabledAttribute : Attribute
+	{
+		public bool IsEnabled { get; set; }
+
+		public DefaultEnabledAttribute(bool isEnabled)
+		{
+			IsEnabled = isEnabled;
+		}
+	}
 }

@@ -21,6 +21,17 @@ namespace IcarusDataMiner
 		private static Logger sLogger;
 #nullable restore warnings
 
+		private const string UsageText =
+			"Usage: IcarusDataMiner [content dir] [output dir] [[miners]]\n" +
+			"\n" +
+			"  content dir   Path the the game's Content directory (Icarus/Content)\n" +
+			"\n" +
+			"  output dir    Path to directory where mined data will be output\n" +
+			"\n" +
+			"  miners        (Optional) Comma separated list of miners to run. If not\n" +
+			"                specified, all default miners will run. Specify 'all' to force\n" +
+			"                all miners to run.";
+
 		/// <summary>
 		/// Program entry point
 		/// </summary>
@@ -30,7 +41,7 @@ namespace IcarusDataMiner
 
 			if (args.Length < 2)
 			{
-				sLogger.Log(LogLevel.Important, "Usage: IcarusDataMiner [game content directory] [output directory] [[optional comma separated list of miners to run, else all will run]]");
+				sLogger.Log(LogLevel.Important, UsageText);
 				return 0;
 			}
 
