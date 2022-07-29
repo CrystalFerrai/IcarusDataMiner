@@ -920,8 +920,13 @@ namespace IcarusDataMiner
 					if (mReader.ReadInt32() != 0) throw new NotImplementedException("Unrecognized value.");
 					return null;
 				case 1:
+				case 2:
 					{
+						// Note: Order of name and struct type could be wrong here. In cases seen so far, the values are the same.
+						// Also, struct type is only a guess at what the second value is. I could not find serialization code in
+						// the engine which matches what is seen here.
 						string? name = ReadName();
+						string? structType = pointerValue == 2 ? ReadName() : null;
 						int resourceIndex = mReader.ReadInt32();
 						FObjectResource resource = (resourceIndex >= 0)
 							? mPackage.ExportMap[resourceIndex]
