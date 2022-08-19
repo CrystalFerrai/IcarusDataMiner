@@ -447,15 +447,22 @@ namespace IcarusDataMiner.Miners
 
 			public bool IsValid()
 			{
-				return ID != null && Name != null && Duration != null && NodeAmountMin != int.MaxValue && NodeAmountMax != int.MinValue;
+				return ID != null && Name != null && Duration != null;
 			}
 
 			public string Serialize()
 			{
-				string nodeCount = NodeCountMin == NodeCountMax ? NodeCountMin.ToString() : $"\"=\"\"{NodeCountMin}-{NodeCountMax}\"\"\""; // Weird format so that Excel won't interpret the field as a date
+				int countMin = Math.Min(NodeCountMin, Nodes.Count);
+				int countMax = Math.Min(NodeCountMax, Nodes.Count);
+				int amountMin = NodeAmountMin == int.MaxValue ? 0 : NodeAmountMin;
+				int amountMax = NodeAmountMax == int.MinValue ? 0 : NodeAmountMax;
+
+				// Weird format so that Excel won't interpret the field as a date
+				string nodeCount = countMin == countMax ? countMin.ToString() : $"\"=\"\"{countMin}-{countMax}\"\"\"";
+				string nodeAmount = amountMin == amountMax ? amountMin.ToString() : $"\"=\"\"{amountMin}-{amountMax}\"\"\"";
 				string nodeList = $"\"{string.Join(", ", Nodes)}\"";
 
-				string value = $"{ID},{Name},{Duration},{nodeCount},{nodeList},{NodeAmountMin}-{NodeAmountMax}";
+				string value = $"{ID},{Name},{Duration},{nodeCount},{nodeList},{nodeAmount}";
 
 				return value;
 			}
