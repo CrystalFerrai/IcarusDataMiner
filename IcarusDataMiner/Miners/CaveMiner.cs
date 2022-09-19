@@ -640,6 +640,12 @@ namespace IcarusDataMiner.Miners
 			public FVector Position;
 			public FRotator Rotation;
 
+			public Locator()
+			{
+				Position = new FVector();
+				Rotation = new FRotator();
+			}
+
 			public Locator(FVector position, FRotator rotation)
 			{
 				Position = position;
