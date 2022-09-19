@@ -36,12 +36,7 @@ namespace IcarusDataMiner
 
 		public static string GetPackageName(string objectName, string extension = "umap")
 		{
-			string packageName = objectName[..objectName.LastIndexOf('.')];
-			if (packageName.StartsWith("/Game/"))
-			{
-				packageName = $"Icarus/Content{packageName[5..]}.{extension}";
-			}
-			return packageName;
+			return AssetUtil.GetPackageName(objectName, extension);
 		}
 	}
 
