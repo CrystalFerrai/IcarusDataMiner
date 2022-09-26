@@ -21,6 +21,11 @@ namespace IcarusDataMiner
 	/// </summary>
 	internal class WorldDataUtil
 	{
+		/// <summary>
+		/// When maps are split into tiles, this is the size (width/height), in world coordinates, of one tile
+		/// </summary>
+		public const int TileSize = 100800;
+
 		public string RowStruct { get; set; }
 
 		public WorldData Defaults { get; set; }

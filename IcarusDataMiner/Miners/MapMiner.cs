@@ -32,8 +32,6 @@ namespace IcarusDataMiner.Miners
 	[DefaultEnabled(false)]
 	internal class MapMiner : IDataMiner
 	{
-		private const int TileSize = 100800;
-
 		public string Name => "Maps";
 
 		public bool Run(IProviderManager providerManager, Config config, Logger logger)
@@ -66,8 +64,8 @@ namespace IcarusDataMiner.Miners
 				float worldWidth = worldData.MinimapData.WorldBoundaryMax.X - worldData.MinimapData.WorldBoundaryMin.X;
 				float worldHeight = worldData.MinimapData.WorldBoundaryMax.Y - worldData.MinimapData.WorldBoundaryMin.Y;
 
-				cols = (int)(worldWidth / TileSize);
-				rows = (int)(worldHeight / TileSize);
+				cols = (int)(worldWidth / WorldDataUtil.TileSize);
+				rows = (int)(worldHeight / WorldDataUtil.TileSize);
 			}
 
 			if (cols * rows > texturePaths.Count)
@@ -152,39 +150,19 @@ namespace IcarusDataMiner.Miners
 
 		private static SKBitmap? DecodeTexture(string name, string assetPath, IFileProvider provider, Logger logger)
 		{
-			string path = $"{assetPath[..assetPath.LastIndexOf('.')]}.uasset";
-			if (path.StartsWith("/Game/")) path = $"Icarus/Content/{path["/Game/".Length..]}";
-
-			GameFile? assetFile;
-			if (!provider.Files.TryGetValue(path, out assetFile))
+			UTexture2D? texture = AssetUtil.LoadTexture(assetPath, provider);
+			if (texture == null)
 			{
-				logger.Log(LogLevel.Warning, $"Could not find map tile '{path}' for map '{name}'");
+				logger.Log(LogLevel.Warning, $"Failed to load texture asset for '{name}'");
 				return null;
 			}
 
-			string fileName = Path.GetFileNameWithoutExtension(path);
-			logger.Log(LogLevel.Debug, $"Reading {fileName}");
-
-			Package assetPackage = (Package)provider.LoadPackage(assetFile);
-			foreach (FObjectExport export in assetPackage.ExportMap)
+			SKBitmap? bitmap = texture.Decode();
+			if (bitmap == null)
 			{
-				UObject obj = export.ExportObject.Value;
-				UTexture2D? texture = obj as UTexture2D;
-				if (texture == null) continue;
-
-				SKBitmap? bitmap = texture.Decode();
-				if (bitmap == null)
-				{
-					logger.Log(LogLevel.Warning, $"Failed to decode texture '{fileName}'");
-					continue;
-				}
-
-				// Assuming only one texture per asset
-				return bitmap;
+				logger.Log(LogLevel.Warning, $"Failed to decode texture '{name}'");
 			}
-
-			logger.Log(LogLevel.Warning, $"'{path}' does not appear to be a valid texture asset");
-			return null;
+			return bitmap;
 		}
 
 		private struct Tile
