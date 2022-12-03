@@ -26,7 +26,7 @@ namespace IcarusDataMiner
 
 		static LocalizationUtil()
 		{
-			sLocTextRegex = new Regex(@"NSLOCTEXT\(\""(.+)\""\, \""(.+)\""\, \""(.+)\""\)");
+			sLocTextRegex = new Regex(@"NSLOCTEXT\(\""(.*)\""\, \""(.+)\""\, \""(.*)\""\)");
 		}
 
 		/// <summary>

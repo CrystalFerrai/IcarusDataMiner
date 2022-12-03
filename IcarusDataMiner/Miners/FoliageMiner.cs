@@ -40,7 +40,7 @@ namespace IcarusDataMiner.Miners
 		// Must be at least double the value of GroupDistanceThreshold to not break the algorithm.
 		private const float PartitionSize = 10080.0f;
 
-		private static HashSet<string> sPlantList;
+		private static Dictionary<string, string> sPlantMap;
 
 		public string Name => "Foliage";
 
@@ -51,23 +51,27 @@ namespace IcarusDataMiner.Miners
 
 			// List of plant types to collect data about.
 			// Refer to Data/FLOD/D_FLODDescriptions.json for all possible types
-			sPlantList = new HashSet<string>()
+			sPlantMap = new Dictionary<string, string>()
 			{
-				"FT_Beans",
-				"FT_Carrot",
-				"FT_Cocoa",
-				"FT_Coffee",
-				"FT_CornCob_01",
-				"FT_CropCorn_01",
-				"FT_GreenTea",
-				"FT_Pumpkin",
-				"FT_ReedFlower_01",
-				"FT_Sponge_01",
-				"FT_Squash",
-				"FT_Watermelon",
-				"FT_Wheat_03",
-				"FT_WildTea",
-				"FT_YeastPlant_01"
+				{ "FT_Alpine_Lily_01", "Lily" },
+				{ "FT_Beans", "Beans" },
+				{ "FT_Carrot", "Carrot" },
+				{ "FT_Cocoa", "Cocoa" },
+				{ "FT_Coffee", "Coffee" },
+
+				// Corn cobs and corn stalks always appear in the same places and have the same loot so we combine them as just "Corn"
+				{ "FT_CornCob_01", "Corn" },
+				{ "FT_CropCorn_01", "Corn" },
+
+				{ "FT_GreenTea", "GreenTea" },
+				{ "FT_Pumpkin", "Pumpkin" },
+				{ "FT_ReedFlower_01", "Reed" },
+				{ "FT_Sponge_01", "Sponge" },
+				{ "FT_Squash", "Squash" },
+				{ "FT_Watermelon", "Watermelon" },
+				{ "FT_Wheat_03", "Wheat" },
+				{ "FT_WildTea", "WildTea" },
+				{ "FT_YeastPlant_01", "Yeast" }
 			};
 		}
 
@@ -150,7 +154,32 @@ namespace IcarusDataMiner.Miners
 				foliage.BuildClusters();
 			}
 
-			string outPath = Path.Combine(config.OutputDirectory, $"{Name}_{mapAsset.NameWithoutExtension}.csv");
+			ExportData(mapAsset.NameWithoutExtension, foliageData, config, logger);
+
+			ExportImages(mapAsset.NameWithoutExtension, providerManager, worldData, foliageData, config, logger);
+		}
+
+		private void ExportData(string mapName, Dictionary<string, FoliageData> foliageData, Config config, Logger logger)
+		{
+			// The first output is for code parsing and DB importing for IcarusIntel
+			string outPath = Path.Combine(config.OutputDirectory, $"{Name}_{mapName}.csv");
+
+			using (FileStream outStream = IOUtil.CreateFile(outPath, logger))
+			using (StreamWriter writer = new StreamWriter(outStream))
+			{
+				writer.WriteLine("map,x,y,variety,count");
+
+				foreach (var pair in foliageData)
+				{
+					for (int i = 0; i < pair.Value.Clusters!.Count; ++i)
+					{
+						writer.WriteLine($"{mapName},{pair.Value.Clusters![i].CenterX},{pair.Value.Clusters![i].CenterY},{pair.Key},{pair.Value.Clusters![i].Count}");
+					}
+				}
+			}
+
+			// The second output is meant to be human readable
+			outPath = Path.Combine(config.OutputDirectory, $"{Name}_{mapName}_Readable.csv");
 
 			using (FileStream outStream = IOUtil.CreateFile(outPath, logger))
 			using (StreamWriter writer = new StreamWriter(outStream))
@@ -185,8 +214,6 @@ namespace IcarusDataMiner.Miners
 					writer.WriteLine();
 				}
 			}
-
-			ExportImages(mapAsset.NameWithoutExtension, providerManager, worldData, foliageData, config, logger);
 		}
 
 		private void ExportImages(string mapName, IProviderManager providerManager, WorldData worldData, IReadOnlyDictionary<string, FoliageData> foliageData, Config config, Logger logger)
@@ -322,9 +349,9 @@ namespace IcarusDataMiner.Miners
 							{
 								if (foliageType != null && meshPath != null)
 								{
-									if (sPlantList.Contains(foliageType))
+									if (sPlantMap.TryGetValue(foliageType, out string? plantName))
 									{
-										meshPaths.Add(GetMeshNameFromFoliage(meshPath, providerManager, logger), foliageType);
+										meshPaths.Add(GetMeshNameFromFoliage(meshPath, providerManager, logger), plantName);
 									}
 									foliageType = null;
 									meshPath = null;
