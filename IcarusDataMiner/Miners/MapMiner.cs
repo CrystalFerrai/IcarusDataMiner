@@ -64,8 +64,8 @@ namespace IcarusDataMiner.Miners
 				float worldWidth = worldData.MinimapData.WorldBoundaryMax.X - worldData.MinimapData.WorldBoundaryMin.X;
 				float worldHeight = worldData.MinimapData.WorldBoundaryMax.Y - worldData.MinimapData.WorldBoundaryMin.Y;
 
-				cols = (int)(worldWidth / WorldDataUtil.TileSize);
-				rows = (int)(worldHeight / WorldDataUtil.TileSize);
+				cols = (int)(worldWidth / WorldDataUtil.WorldTileSize);
+				rows = (int)(worldHeight / WorldDataUtil.WorldTileSize);
 			}
 
 			if (cols * rows > texturePaths.Count)

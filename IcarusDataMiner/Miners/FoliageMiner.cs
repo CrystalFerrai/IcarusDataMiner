@@ -32,13 +32,18 @@ namespace IcarusDataMiner.Miners
 	internal class FoliageMiner : IDataMiner
 	{
 		// Foliage instances less than this distance apart will be grouped. Distance calculation based on Manhattan distance.
-		// Tweaking this affects how output data is grouped. 1008 = 1/50 of a map grid cell
-		private const float GroupDistanceThreshold = 2016.0f;
+		// Tweaking this affects how output data is grouped.
+		private const float GroupDistanceThreshold = WorldDataUtil.WorldCellSize * 0.04f; // 25x25 points per cell
+		//private const float GroupDistanceThreshold = WorldDataUtil.WorldCellSize * 0.16f;
 
 		// Size to break world into for collision detection algorithm.
 		// Tweaking this affects running time and and memory usage of this miner.
 		// Must be at least double the value of GroupDistanceThreshold to not break the algorithm.
-		private const float PartitionSize = 10080.0f;
+		private const float PartitionSize = WorldDataUtil.WorldCellSize * 0.2f;
+		//private const float PartitionSize = WorldDataUtil.WorldCellSize * 0.4f;
+
+		// Maximum size of a cluster point for exported map images
+		private const float MaxPointSize = (float)(GroupDistanceThreshold * WorldDataUtil.WorldToMap);
 
 		private static Dictionary<string, string> sPlantMap;
 
@@ -49,28 +54,56 @@ namespace IcarusDataMiner.Miners
 			ObjectTypeRegistry.RegisterClass("FLODFISMComponent", typeof(UHierarchicalInstancedStaticMeshComponent));
 			ObjectTypeRegistry.RegisterClass("IcarusFLODFISMComponent", typeof(UHierarchicalInstancedStaticMeshComponent));
 
-			// List of plant types to collect data about.
+			// Map of plant types to collect data about.
 			// Refer to Data/FLOD/D_FLODDescriptions.json for all possible types
 			sPlantMap = new Dictionary<string, string>()
 			{
+				// NOTE: Commented out entries exist in the data but no instances have been found on any maps so not sure precisely what they are.
+				// Specualtion: They might be new crop types and variations coming in a future DLC.
+
 				{ "FT_Alpine_Lily_01", "Lily" },
+
 				{ "FT_Beans", "Beans" },
+				//{ "FT_LC_Beans", "LC_Beans" },
+
 				{ "FT_Carrot", "Carrot" },
+
 				{ "FT_Cocoa", "Cocoa" },
+				//{ "FT_LC_Cocoa", "LC_Cocoa" },
+
 				{ "FT_Coffee", "Coffee" },
+
+				// There are many instances of this, but sure what it actually is
+				//{ "FT_ConiferFlower_01", "Flower" },
 
 				// Corn cobs and corn stalks always appear in the same places and have the same loot so we combine them as just "Corn"
 				{ "FT_CornCob_01", "Corn" },
 				{ "FT_CropCorn_01", "Corn" },
 
 				{ "FT_GreenTea", "GreenTea" },
+
+				//{ "FT_SW_Potato_Wild", "SW_Potato" },
+				//{ "FT_TU_Potato_Wild", "TU_Potato" },
+
 				{ "FT_Pumpkin", "Pumpkin" },
+				//{ "FT_TU_Pumpkin", "TU_Pumpkin" },
+
 				{ "FT_ReedFlower_01", "Reed" },
+				
 				{ "FT_Sponge_01", "Sponge" },
+
 				{ "FT_Squash", "Squash" },
+				//{ "FT_LC_Squash", "LC_Squash" },
+
+				//{ "FT_Tomatoes_Wild", "Tomato" },
+				
 				{ "FT_Watermelon", "Watermelon" },
+				
 				{ "FT_Wheat_03", "Wheat" },
+
 				{ "FT_WildTea", "WildTea" },
+				//{ "FT_LC_WildTea", "LC_WildTea" },
+
 				{ "FT_YeastPlant_01", "Yeast" }
 			};
 		}
@@ -125,8 +158,8 @@ namespace IcarusDataMiner.Miners
 				float worldWidth = worldData.MinimapData!.WorldBoundaryMax.X - worldData.MinimapData!.WorldBoundaryMin.X;
 				float worldHeight = worldData.MinimapData!.WorldBoundaryMax.Y - worldData.MinimapData!.WorldBoundaryMin.Y;
 
-				cols = (int)(worldWidth / WorldDataUtil.TileSize);
-				rows = (int)(worldHeight / WorldDataUtil.TileSize);
+				cols = (int)(worldWidth / WorldDataUtil.WorldTileSize);
+				rows = (int)(worldHeight / WorldDataUtil.WorldTileSize);
 			}
 			for (int x = 0; x < rows; ++x)
 			{
@@ -138,8 +171,8 @@ namespace IcarusDataMiner.Miners
 					if (!providerManager.AssetProvider.Files.TryGetValue(packagePath, out packageFile)) continue;
 
 					FVector origin = new FVector(
-						x * WorldDataUtil.TileSize + worldData.MinimapData!.WorldBoundaryMin.X,
-						-((y + 1) * WorldDataUtil.TileSize + worldData.MinimapData!.WorldBoundaryMin.Y),
+						x * WorldDataUtil.WorldTileSize + worldData.MinimapData!.WorldBoundaryMin.X,
+						-((y + 1) * WorldDataUtil.WorldTileSize + worldData.MinimapData!.WorldBoundaryMin.Y),
 						0.0f);
 
 					logger.Log(LogLevel.Debug, $"Searching {packageFile.NameWithoutExtension}");
@@ -224,15 +257,14 @@ namespace IcarusDataMiner.Miners
 			float mapWidth = worldData.MinimapData.WorldBoundaryMax.X - offsetX;
 			float mapHeight = worldData.MinimapData.WorldBoundaryMax.Y - offsetY;
 
-			// This is the scale *usually* used to create map images for the game
-			float scaleX = 1.0f / (50400.0f / 256.0f);
-			float scaleY = 1.0f / (50400.0f / 256.0f);
+			float scaleX = (float)(1.0f / WorldDataUtil.MapToWorld);
+			float scaleY = (float)(1.0f / WorldDataUtil.MapToWorld);
 
 			UTexture2D? firstTileTexture = AssetUtil.LoadTexture(worldData.MinimapData!.MapTextures[0], providerManager.AssetProvider);
 			if (firstTileTexture != null)
 			{
-				scaleX = (float)firstTileTexture.SizeX / (float)WorldDataUtil.TileSize;
-				scaleY = (float)firstTileTexture.SizeY / (float)WorldDataUtil.TileSize;
+				scaleX = (float)firstTileTexture.SizeX / (float)WorldDataUtil.WorldTileSize;
+				scaleY = (float)firstTileTexture.SizeY / (float)WorldDataUtil.WorldTileSize;
 			}
 
 			int imageWidth = (int)Math.Ceiling(mapWidth * scaleX);

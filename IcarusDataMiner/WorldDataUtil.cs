@@ -24,7 +24,27 @@ namespace IcarusDataMiner
 		/// <summary>
 		/// When maps are split into tiles, this is the size (width/height), in world coordinates, of one tile
 		/// </summary>
-		public const int TileSize = 100800;
+		public const int WorldTileSize = 100800;
+
+		/// <summary>
+		/// The size of a map grid cell, in world coordinates
+		/// </summary>
+		public const int WorldCellSize = WorldTileSize / 2;
+
+		/// <summary>
+		/// The size of a map grid cell, in map image coordinates
+		/// </summary>
+		public const int MapCellSize = 256;
+
+		/// <summary>
+		/// Translate a distance value from map coordinates to world coordinates by multiplying this value
+		/// </summary>
+		public const double MapToWorld = (double)WorldCellSize / (double)MapCellSize;
+
+		/// <summary>
+		/// Translate a distance value from world coordinates to map coordinates by multiplying this value
+		/// </summary>
+		public const double WorldToMap = (double)MapCellSize / (double)WorldCellSize;
 
 		public string RowStruct { get; set; }
 
@@ -78,11 +98,8 @@ namespace IcarusDataMiner
 		{
 			if (MinimapData == null) return string.Empty;
 
-			// A single grid cell always represents 50400 units along each axis
-			const float CellSize = 50400.0f;
-
-			int X = (int)Math.Floor((location.X - MinimapData.WorldBoundaryMin.X) / CellSize);
-			int Y = (int)Math.Floor((location.Y - MinimapData.WorldBoundaryMin.Y) / CellSize);
+			int X = (int)Math.Floor((location.X - MinimapData.WorldBoundaryMin.X) / WorldDataUtil.WorldCellSize);
+			int Y = (int)Math.Floor((location.Y - MinimapData.WorldBoundaryMin.Y) / WorldDataUtil.WorldCellSize);
 
 			return $"{(char)('A' + X)}{Y + 1}";
 		}
