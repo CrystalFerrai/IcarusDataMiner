@@ -31,12 +31,15 @@ namespace IcarusDataMiner
 		private readonly DefaultFileProvider mAssetProvider;
 
 		private WorldDataUtil? mWorldDataUtil;
+		private ProspectDataUtil? mProspectDataUtil;
 
 		public IFileProvider DataProvider => mDataProvider;
 
 		public IFileProvider AssetProvider => mAssetProvider;
 
-		public WorldDataUtil WorldDataUtil => mWorldDataUtil!;
+		public WorldDataUtil WorldDataUtil => mWorldDataUtil ?? throw new InvalidOperationException("Manager not intialized");
+
+		public ProspectDataUtil ProspectDataUtil => mProspectDataUtil ?? throw new InvalidOperationException("Manager not intialized");
 
 		public ProviderManager(Config config)
 		{
@@ -50,6 +53,7 @@ namespace IcarusDataMiner
 			InitializeProvider(mAssetProvider);
 
 			mWorldDataUtil = LoadWorldData();
+			mProspectDataUtil = ProspectDataUtil.Create(mDataProvider, logger);
 			if (mWorldDataUtil == null)
 			{
 				logger.Log(LogLevel.Error, "Failed to load world data from D_WorldData.json in data.pak");

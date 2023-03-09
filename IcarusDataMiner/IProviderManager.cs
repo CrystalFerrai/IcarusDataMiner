@@ -35,5 +35,10 @@ namespace IcarusDataMiner
 		/// Provides info obtained from the D_WorldData table
 		/// </summary>
 		WorldDataUtil WorldDataUtil { get; }
+
+		/// <summary>
+		/// Provides info about prospects
+		/// </summary>
+		ProspectDataUtil ProspectDataUtil { get; }
 	}
 }

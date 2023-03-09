@@ -287,7 +287,7 @@ namespace IcarusDataMiner.Miners
 				using (SKSurface surface = SKSurface.Create(surfaceInfo))
 				{
 					SKCanvas canvas = surface.Canvas;
-					SKPaint paint = new SKPaint()
+					using SKPaint paint = new SKPaint()
 					{
 						Color = SKColors.White,
 						IsStroke = false,

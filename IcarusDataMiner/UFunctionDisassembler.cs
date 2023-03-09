@@ -344,7 +344,7 @@ namespace IcarusDataMiner
 				case EExprToken.Jump:
 					{
 						int skipCount = mReader.ReadInt32();
-						Log(opcode, $"Offset = {skipCount:X}");
+						Log(opcode, $"Offset = 0x{skipCount:X}");
 						break;
 					}
 				case EExprToken.LocalVariable:
