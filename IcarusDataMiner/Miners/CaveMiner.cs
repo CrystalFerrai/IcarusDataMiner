@@ -35,7 +35,7 @@ namespace IcarusDataMiner.Miners
 
 		static CaveMiner()
 		{
-			sCaveIdRegex = new Regex(@"BP_Cave(?:Instance)?(\d*)_GENERATED_.+");
+			sCaveIdRegex = new Regex(@"BP_Cave(?:Prefab)?(?:_C_)*(\d*).*");
 		}
 
 		public bool Run(IProviderManager providerManager, Config config, Logger logger)
@@ -43,7 +43,7 @@ namespace IcarusDataMiner.Miners
 			logger.Log(LogLevel.Information, "Loading cave templates...");
 			Dictionary<string, CaveTemplate> templates = new Dictionary<string, CaveTemplate>();
 
-			const string TemplateMatch = "Icarus/Content/BP/World/CaveTemplates/Templates/*.uasset";
+			const string TemplateMatch = "Icarus/Content/Prefabs/Cave/*.uasset";
 
 			foreach (var pair in providerManager.AssetProvider.Files)
 			{
@@ -52,10 +52,7 @@ namespace IcarusDataMiner.Miners
 					CaveTemplate? template = LoadCaveTemplate(pair.Value, providerManager, config, logger);
 					if (template != null)
 					{
-						// Convert file path to asset path pointing to template object in file. This is what references will be looking for later.
-						// "Icarus/Content/BP/World/CaveTemplates/Templates/CAVE_CF_MED_002" -> "/Game/BP/World/CaveTemplates/Templates/CAVE_CF_MED_002.CAVE_CF_MED_002"
-						string objectPath = $"{pair.Value.PathWithoutExtension.Replace("Icarus/Content", "/Game")}.{template.Name}";
-						templates.Add(objectPath, template);
+						templates.Add(pair.Value.NameWithoutExtension, template);
 					}
 				}
 			}
@@ -81,9 +78,9 @@ namespace IcarusDataMiner.Miners
 			Package templatePackage = (Package)providerManager.AssetProvider.LoadPackage(templateAsset);
 
 			FObjectExport export = templatePackage.ExportMap[0];
-			if (!export.ClassName.Equals("CaveTemplateAsset"))
+			if (!export.ClassName.Equals("CavePrefabAsset"))
 			{
-				logger.Log(LogLevel.Warning, $"Asset {templateAsset.NameWithoutExtension} does not appear to be a CaveTemplateAsset");
+				logger.Log(LogLevel.Warning, $"Asset {templateAsset.NameWithoutExtension} does not appear to be a CavePrefabAsset");
 				return null;
 			}
 			UObject templateObject = export.ExportObject.Value;
@@ -98,6 +95,18 @@ namespace IcarusDataMiner.Miners
 				FPropertyTag property = templateObject.Properties[i];
 				switch (property.Name.PlainText)
 				{
+					case "Entrances":
+						{
+							UScriptArray entrancesArray = PropertyUtil.GetByIndex<UScriptArray>(templateObject, i);
+							for (int j = 0; j < entrancesArray.Properties.Count; ++j)
+							{
+								UScriptStruct entranceObject = (UScriptStruct)entrancesArray.Properties[j].GetValue(typeof(UScriptStruct))!;
+								FPropertyTag transformProperty = ((FStructFallback)entranceObject.StructType).Properties[0];
+								FTransform transform = new((FStructFallback)transformProperty.Tag!.GetValue(typeof(FStructFallback))!);
+								template.Entrances.Add(new Locator(transform.Translation, transform.Rotator()));
+							}
+							break;
+						}
 					case "Lakes":
 						{
 							UScriptArray lakesArray = PropertyUtil.GetByIndex<UScriptArray>(templateObject, i);
@@ -211,51 +220,11 @@ namespace IcarusDataMiner.Miners
 				}
 			}
 
-			// Find the CaveLocations array in the map and build an array of cave templates in the same order that can be indexed later.
-			CaveTemplate[]? orderedTemplates = null;
-			foreach (FObjectExport? export in mapPackage.ExportMap)
-			{
-				if (export == null) continue;
-				if (export.ClassIndex.Index != worldSettingsTypeIndex) continue;
-
-				UObject settingsObject = export.ExportObject.Value;
-				for (int i = 0; i < settingsObject.Properties.Count; ++i)
-				{
-					FPropertyTag prop = settingsObject.Properties[i];
-					if (prop.Name.Index == caveLocationsIndex)
-					{
-						UScriptArray caveLocationsArray = PropertyUtil.GetByIndex<UScriptArray>(settingsObject, i);
-						orderedTemplates = new CaveTemplate[caveLocationsArray.Properties.Count];
-						for (int j = 0; j < caveLocationsArray.Properties.Count; ++j)
-						{
-							UScriptStruct caveLocationStruct = (UScriptStruct)caveLocationsArray.Properties[j].GetValue(typeof(UScriptStruct))!;
-							IPropertyHolder caveLocationProperties = (IPropertyHolder)caveLocationStruct.StructType;
-							for (int k = 0; k < caveLocationProperties.Properties.Count; ++k)
-							{
-								FPropertyTag clProp = caveLocationProperties.Properties[k];
-								if (clProp.Name.Index == templateIndex)
-								{
-									FSoftObjectPath templatePath = PropertyUtil.GetByIndex<FSoftObjectPath>(caveLocationProperties, k);
-									orderedTemplates[j] = templates[templatePath.AssetPathName.Text];
-									break;
-								}
-							}
-						}
-
-						break;
-					}
-				}
-			}
-			if (orderedTemplates == null)
-			{
-				logger.Log(LogLevel.Information, $"Could not locate array CaveLocations in map {mapAsset.NameWithoutExtension}. If any template caves are present, their details will be missing from the output.");
-			}
-
-			// Build lists of caves by searching all generated sublevels for the map
+			// Build lists of caves by searching developer sublevels for the map
 			List<CaveData> templateCaves = new List<CaveData>();
 			List<CaveData> customCaves = new List<CaveData>();
 
-			foreach (string levelPath in worldData.GeneratedLevels)
+			foreach (string levelPath in worldData.DeveloperLevels)
 			{
 				string packagePath = WorldDataUtil.GetPackageName(levelPath);
 
@@ -263,7 +232,9 @@ namespace IcarusDataMiner.Miners
 				if (!providerManager.AssetProvider.Files.TryGetValue(packagePath, out packageFile)) continue;
 
 				logger.Log(LogLevel.Debug, $"Searching {packageFile.NameWithoutExtension}");
-				foreach (CaveData cave in FindCaves(packageFile, orderedTemplates, providerManager, config, logger))
+
+				string quadName = packageFile.NameWithoutExtension.Substring(packageFile.NameWithoutExtension.LastIndexOf('_') + 1);
+				foreach (CaveData cave in FindCaves(packageFile, quadName, templates, providerManager, config, logger))
 				{
 					if (cave.Template != null) templateCaves.Add(cave);
 					else customCaves.Add(cave);
@@ -280,18 +251,18 @@ namespace IcarusDataMiner.Miners
 				using (FileStream outStream = IOUtil.CreateFile(outPath, logger))
 				using (StreamWriter writer = new StreamWriter(outStream))
 				{
-					writer.WriteLine("ID,Template,Ore Pool,Ore Count,Exotics,Veins,Worms,Lakes,Mushrooms,Entrance X,Entrance Y,Entrance Z,Entrance R,Entrance Grid");
+					writer.WriteLine("Quad,ID,Template,Ore Pool,Ore Count,Exotics,Veins,Worms,Lakes,Mushrooms,Entrance X,Entrance Y,Entrance Z,Entrance R,Entrance Grid");
 
 					foreach (CaveData cave in templateCaves)
 					{
 						if (cave.Template!.OreData.Count != 1) throw new NotImplementedException();
-						if (cave.Entrances.Count != 1) throw new NotImplementedException();
+						if (cave.Template!.Entrances.Count != 1) throw new NotImplementedException();
 
 						string wormCount = $"\"=\"\"{cave.Template.WormCountMin}-{cave.Template.WormCountMax}\"\"\""; // Weird format so that Excel won't interpret the field as a date
 
-						CaveEntranceData entrance = cave.Entrances[0];
+						Locator entrance = cave.Entrances[0].Location;
 
-						writer.WriteLine($"{cave.ID},{cave.Template.Name},{cave.Template.OreData[0].Pool},{cave.Template.OreData[0].Count},{cave.Template.ExoticCount},{cave.Template.VeinCount},{wormCount},{cave.Template.LakeCount},{cave.Template.MushroomCount},{entrance.Location.Position.X},{entrance.Location.Position.Y},{entrance.Location.Position.Z},{entrance.Location.Rotation.Yaw},{worldData.GetGridCell(entrance.Location.Position)}");
+						writer.WriteLine($"{cave.QuadName},{cave.ID},{cave.Template.Name},{cave.Template.OreData[0].Pool},{cave.Template.OreData[0].Count},{cave.Template.ExoticCount},{cave.Template.VeinCount},{wormCount},{cave.Template.LakeCount},{cave.Template.MushroomCount},{entrance.Position.X},{entrance.Position.Y},{entrance.Position.Z},{entrance.Rotation.Yaw},{worldData.GetGridCell(entrance.Position)}");
 					}
 				}
 			}
@@ -314,7 +285,7 @@ namespace IcarusDataMiner.Miners
 						if (cave.SpeculativeEntrances.Count > maxSpecCount) maxSpecCount = cave.SpeculativeEntrances.Count;
 					}
 
-					writer.Write("ID");
+					writer.Write("Quad,ID");
 					for (int i = 0; i < maxEntranceCount; ++i)
 					{
 						writer.Write($",Entrance {i} X,Entrance {i} Y,Entrance {i} Z,Entrance {i} R,Entrance {i} Grid");
@@ -327,7 +298,7 @@ namespace IcarusDataMiner.Miners
 
 					foreach (CaveData cave in customCaves)
 					{
-						writer.Write(cave.ID.ToString());
+						writer.Write($"{cave.QuadName},{cave.ID}");
 						Action<int, IList<CaveEntranceData>> writeEntrances = (max, entrances) =>
 						{
 							for (int i = 0; i < max; ++i)
@@ -351,32 +322,32 @@ namespace IcarusDataMiner.Miners
 			}
 		}
 
-		private IEnumerable<CaveData> FindCaves(GameFile mapAsset, IReadOnlyList<CaveTemplate>? orderedTemplates, IProviderManager providerManager, Config config, Logger logger)
+		private IEnumerable<CaveData> FindCaves(GameFile mapAsset, string quadName, IReadOnlyDictionary<string, CaveTemplate> templates, IProviderManager providerManager, Config config, Logger logger)
 		{
 			CaveTemplate defaultTemplate = new CaveTemplate() { Name = "Unknown" };
 
 			Package mapPackage = (Package)providerManager.AssetProvider.LoadPackage(mapAsset);
 
-			int templateCaveTypeNameIndex = -1, customCaveTypeNameIndex = -1, caveEntranceNameIndex = -1, instanceComponentsIndex = -1, entrancesIndex = -1, entranceRefsIndex = -1, rootComponentIndex = -1, relativeLocationIndex = -1, relativeRotationIndex = -1, attachParentIndex = -1;
+			int templateCaveTypeNameIndex = -1, customCaveTypeNameIndex = -1, prefabAssetNameIndex = -1, caveEntranceNameIndex = -1, instanceComponentsIndex = -1, entranceRefsIndex = -1, rootComponentIndex = -1, relativeLocationIndex = -1, relativeRotationIndex = -1, attachParentIndex = -1;
 			for (int i = 0; i < mapPackage.NameMap.Length; ++i)
 			{
 				FNameEntrySerialized name = mapPackage.NameMap[i];
 				switch (name.Name)
 				{
-					case "BP_CaveInstance_C":
+					case "BP_CavePrefab_C":
 						templateCaveTypeNameIndex = i;
 						break;
 					case "BP_Cave_C":
 						customCaveTypeNameIndex = i;
+						break;
+					case "PrefabAsset":
+						prefabAssetNameIndex = i;
 						break;
 					case "BP_CaveEntranceComponent_C":
 						caveEntranceNameIndex = i;
 						break;
 					case "InstanceComponents":
 						instanceComponentsIndex = i;
-						break;
-					case "Entrances":
-						entrancesIndex = i;
 						break;
 					case "EntranceRefs":
 						entranceRefsIndex = i;
@@ -457,24 +428,24 @@ namespace IcarusDataMiner.Miners
 					continue;
 				}
 
-				CaveData caveData = new CaveData();
+				CaveData caveData = new CaveData(quadName);
 				caveData.ID = match.Groups[1].Value.Length > 0 ? int.Parse(match.Groups[1].Value) : 0;
-
-				int entranceNameIndex;
-				if (export.ClassIndex.Index == templateCaveTypeIndex)
-				{
-					entranceNameIndex = entrancesIndex;
-					caveData.Template = orderedTemplates?[caveData.ID] ?? defaultTemplate;
-				}
-				else
-				{
-					entranceNameIndex = entranceRefsIndex;
-				}
 
 				for (int i = 0; i < caveObject.Properties.Count; ++i)
 				{
 					FPropertyTag prop = caveObject.Properties[i];
-					if (prop.Name.Index == entranceNameIndex)
+					if (prop.Name.Index == prefabAssetNameIndex)
+					{
+						FPackageIndex prefabAssetProperty = (FPackageIndex)prop.Tag!.GetValue(typeof(FPackageIndex))!;
+						if (!templates.TryGetValue(prefabAssetProperty.Name, out CaveTemplate? template))
+						{
+							logger.Log(LogLevel.Warning, $"Template caves references template {prefabAssetProperty.Name} which has not been loaded. Cave will be missing information.");
+							continue;
+						}
+
+						caveData.Template = template;
+					}
+					else if (prop.Name.Index == entranceRefsIndex)
 					{
 						UScriptArray entrances = PropertyUtil.GetByIndex<UScriptArray>(caveObject, i);
 						for (int j = 0; j < entrances.Properties.Count; ++j)
@@ -512,33 +483,54 @@ namespace IcarusDataMiner.Miners
 					}
 				}
 
+				if (caveData.RootComponent == null)
+				{
+					logger.Log(LogLevel.Error, $"Failed to find root component for cave {caveObject.Name}");
+					continue;
+				}
+
+				if (caveData.Template != null)
+				{
+					foreach (Locator entranceLocation in caveData.Template.Entrances)
+					{
+						caveData.Entrances.Add(new CaveEntranceData(caveData.RootComponent) { Location = entranceLocation });
+					}
+				}
+
 				// Convert entrance locations from local space to world space
 				foreach (CaveEntranceData entrance in caveData.Entrances.Concat(caveData.SpeculativeEntrances))
 				{
 					Stack<Locator> locators = new();
 					locators.Push(entrance.Location);
 
-					Stack<UObject> parentStack = new();
-					parentStack.Push(entrance.Component);
-					while (parentStack.Count > 0)
+					if (caveData.Template != null)
 					{
-						UObject currentObject = parentStack.Pop();
-
-						for (int i = 0; i < currentObject.Properties.Count; ++i)
+						locators.Push(parseLocation(caveData.RootComponent));
+					}
+					else
+					{
+						Stack<UObject> parentStack = new();
+						parentStack.Push(entrance.Component);
+						while (parentStack.Count > 0)
 						{
-							FPropertyTag prop = currentObject.Properties[i];
-							if (prop.Name.Index == attachParentIndex)
+							UObject currentObject = parentStack.Pop();
+
+							for (int i = 0; i < currentObject.Properties.Count; ++i)
 							{
-								FPackageIndex componentProperty = PropertyUtil.GetByIndex<FPackageIndex>(currentObject, i);
-								UObject componentObject = componentProperty.ResolvedObject!.Object!.Value;
-
-								if (componentObject != caveData.RootComponent)
+								FPropertyTag prop = currentObject.Properties[i];
+								if (prop.Name.Index == attachParentIndex)
 								{
-									parentStack.Push(componentObject);
-								}
-								locators.Push(parseLocation(componentObject));
+									FPackageIndex componentProperty = PropertyUtil.GetByIndex<FPackageIndex>(currentObject, i);
+									UObject componentObject = componentProperty.ResolvedObject!.Object!.Value;
 
-								break;
+									if (componentObject != caveData.RootComponent)
+									{
+										parentStack.Push(componentObject);
+									}
+									locators.Push(parseLocation(componentObject));
+
+									break;
+								}
 							}
 						}
 					}
@@ -557,6 +549,8 @@ namespace IcarusDataMiner.Miners
 
 		private class CaveData : IComparable<CaveData>
 		{
+			public string QuadName { get; }
+
 			public int ID { get; set; }
 
 			public CaveTemplate? Template { get; set; }
@@ -569,14 +563,24 @@ namespace IcarusDataMiner.Miners
 
 			internal UObject? RootComponent { get; set; }
 
+			public CaveData(string quadName)
+			{
+				QuadName = quadName;
+			}
+
 			public int CompareTo(CaveData? other)
 			{
-				return other == null ? 1 : ID.CompareTo(other.ID);
+				if (other is null) return 1;
+				
+				int quadCompare = QuadName.CompareTo(other.QuadName);
+				if (quadCompare != 0) return quadCompare;
+
+				return ID.CompareTo(other.ID);
 			}
 
 			public override string ToString()
 			{
-				return $"[{ID}] {Template} | {Location.Position} | {Location.Rotation} | {Entrances.Count}+{SpeculativeEntrances.Count} entrance{(Entrances.Count == 1 ? "" : "s")}";
+				return $"[{QuadName} {ID}] {Template} | {Location.Position} | {Location.Rotation} | {Entrances.Count}+{SpeculativeEntrances.Count} entrance{(Entrances.Count == 1 ? "" : "s")}";
 			}
 		}
 
@@ -602,6 +606,8 @@ namespace IcarusDataMiner.Miners
 #nullable disable annotations
 			public string Name { get; set; }
 #nullable restore annotations
+
+			public List<Locator> Entrances { get; } = new List<Locator>();
 
 			public IList<OreData> OreData { get; } = new List<OreData>();
 
