@@ -166,6 +166,12 @@ namespace IcarusDataMiner.Miners
 						canvas.DrawCircle((location.X - offsetX) * scaleX, (location.Y - offsetY) * scaleY, radius, paint);
 					}
 
+					// Single pixel output variant for ore counting purposes
+					//foreach (FVector location in pair.Value)
+					//{
+					//	canvas.DrawPoint((float)Math.Floor((location.X - offsetX) * scaleX) + 0.5f, (float)Math.Round((location.Y - offsetY) * scaleY) + 0.5f, paint);
+					//}
+
 					surface.Flush();
 					SKImage image = surface.Snapshot();
 					outData = image.Encode(SKEncodedImageFormat.Png, 100);

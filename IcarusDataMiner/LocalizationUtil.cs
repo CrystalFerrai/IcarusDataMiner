@@ -22,7 +22,7 @@ namespace IcarusDataMiner
 	/// </summary>
 	internal static class LocalizationUtil
 	{
-		private static Regex sLocTextRegex;
+		private static readonly Regex sLocTextRegex;
 
 		static LocalizationUtil()
 		{
