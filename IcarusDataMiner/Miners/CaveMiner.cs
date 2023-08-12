@@ -18,6 +18,7 @@ using CUE4Parse.UE4.Assets.Exports;
 using CUE4Parse.UE4.Assets.Objects;
 using CUE4Parse.UE4.Objects.Core.Math;
 using CUE4Parse.UE4.Objects.UObject;
+using SkiaSharp;
 using System.IO.Enumeration;
 using System.Text.RegularExpressions;
 
@@ -87,6 +88,8 @@ namespace IcarusDataMiner.Miners
 
 			CaveTemplate template = new CaveTemplate();
 			template.Name = templateObject.Name;
+
+			List<Locator> entranceLocators = new();
 
 			const string oreFoliagePrefix = "BPHV_Foilage_"; // (sp)
 
@@ -247,22 +250,38 @@ namespace IcarusDataMiner.Miners
 			// Write template caves
 			if (templateCaves.Count > 0)
 			{
-				string outPath = Path.Combine(config.OutputDirectory, $"{Name}_{mapAsset.NameWithoutExtension}.csv");
-				using (FileStream outStream = IOUtil.CreateFile(outPath, logger))
-				using (StreamWriter writer = new StreamWriter(outStream))
+				// CSV
 				{
-					writer.WriteLine("Quad,ID,Template,Ore Pool,Ore Count,Exotics,Veins,Worms,Lakes,Mushrooms,Entrance X,Entrance Y,Entrance Z,Entrance R,Entrance Grid");
-
-					foreach (CaveData cave in templateCaves)
+					string outPath = Path.Combine(config.OutputDirectory, Name, "Data", $"{mapAsset.NameWithoutExtension}.csv");
+					using (FileStream outStream = IOUtil.CreateFile(outPath, logger))
+					using (StreamWriter writer = new StreamWriter(outStream))
 					{
-						if (cave.Template!.OreData.Count != 1) throw new NotImplementedException();
-						if (cave.Template!.Entrances.Count != 1) throw new NotImplementedException();
+						writer.WriteLine("Quad,ID,Template,Ore Pool,Ore Count,Exotics,Veins,Worms,Lakes,Mushrooms,Entrance X,Entrance Y,Entrance Z,Entrance R,Entrance Grid");
 
-						string wormCount = $"\"=\"\"{cave.Template.WormCountMin}-{cave.Template.WormCountMax}\"\"\""; // Weird format so that Excel won't interpret the field as a date
+						foreach (CaveData cave in templateCaves)
+						{
+							if (cave.Template!.OreData.Count != 1) throw new NotImplementedException();
+							if (cave.Template!.Entrances.Count != 1) throw new NotImplementedException();
 
-						Locator entrance = cave.Entrances[0].Location;
+							string wormCount = $"\"=\"\"{cave.Template.WormCountMin}-{cave.Template.WormCountMax}\"\"\""; // Weird format so that Excel won't interpret the field as a date
 
-						writer.WriteLine($"{cave.QuadName},{cave.ID},{cave.Template.Name},{cave.Template.OreData[0].Pool},{cave.Template.OreData[0].Count},{cave.Template.ExoticCount},{cave.Template.VeinCount},{wormCount},{cave.Template.LakeCount},{cave.Template.MushroomCount},{entrance.Position.X},{entrance.Position.Y},{entrance.Position.Z},{entrance.Rotation.Yaw},{worldData.GetGridCell(entrance.Position)}");
+							Locator entrance = cave.Entrances[0].Location;
+
+							writer.WriteLine($"{cave.QuadName},{cave.ID},{cave.Template.Name},{cave.Template.OreData[0].Pool},{cave.Template.OreData[0].Count},{cave.Template.ExoticCount},{cave.Template.VeinCount},{wormCount},{cave.Template.LakeCount},{cave.Template.MushroomCount},{entrance.Position.X},{entrance.Position.Y},{entrance.Position.Z},{entrance.Rotation.Yaw},{worldData.GetGridCell(entrance.Position)}");
+						}
+					}
+				}
+
+				// Image
+				{
+					MapOverlayBuilder mapBuilder = MapOverlayBuilder.Create(worldData, providerManager.AssetProvider);
+					mapBuilder.AddLocations(templateCaves.SelectMany(c => c.Entrances.Select(e => new RotatedMapLocation(e.Location.Position, e.Location.Rotation.Yaw))), Resources.Icon_Cave);
+					SKData outData = mapBuilder.DrawOverlay();
+
+					string outPath = Path.Combine(config.OutputDirectory, Name, "Visual", $"{mapAsset.NameWithoutExtension}.png");
+					using (FileStream outStream = IOUtil.CreateFile(outPath, logger))
+					{
+						outData.SaveTo(outStream);
 					}
 				}
 			}
@@ -270,7 +289,7 @@ namespace IcarusDataMiner.Miners
 			// Write custom caves
 			if (customCaves.Count > 0)
 			{
-				string outCustomPath = Path.Combine(config.OutputDirectory, $"{Name}_{mapAsset.NameWithoutExtension}_Custom.csv");
+				string outCustomPath = Path.Combine(config.OutputDirectory, Name, "Data", $"{mapAsset.NameWithoutExtension}_Custom.csv");
 				using (FileStream outStream = IOUtil.CreateFile(outCustomPath, logger))
 				using (StreamWriter writer = new StreamWriter(outStream))
 				{
@@ -404,7 +423,7 @@ namespace IcarusDataMiner.Miners
 				return location;
 			};
 
-			Func<UObject, CaveEntranceData> parseCave = (entranceComponentObject) =>
+			Func<UObject, CaveEntranceData> parseEntrance = (entranceComponentObject) =>
 			{
 				return new CaveEntranceData(entranceComponentObject) { Location = parseLocation(entranceComponentObject) };
 			};
@@ -453,7 +472,7 @@ namespace IcarusDataMiner.Miners
 							FPackageIndex entranceComponentProperty = (FPackageIndex)entrances.Properties[j].GetValue(typeof(FPackageIndex))!;
 							UObject entranceComponentObject = entranceComponentProperty.ResolvedObject!.Object!.Value;
 
-							caveData.Entrances.Add(parseCave(entranceComponentObject));
+							caveData.Entrances.Add(parseEntrance(entranceComponentObject));
 						}
 					}
 					else if (prop.Name.Index == instanceComponentsIndex)
@@ -470,7 +489,7 @@ namespace IcarusDataMiner.Miners
 
 							UObject entranceComponentObject = componentPath.ResolvedObject!.Object!.Value;
 
-							caveData.SpeculativeEntrances.Add(parseCave(entranceComponentObject));
+							caveData.SpeculativeEntrances.Add(parseEntrance(entranceComponentObject));
 						}
 					}
 					else if (prop.Name.Index == rootComponentIndex)
@@ -491,6 +510,7 @@ namespace IcarusDataMiner.Miners
 
 				if (caveData.Template != null)
 				{
+					//if (caveData.Template.Name == "CAVE_CF_MED_004") System.Diagnostics.Debugger.Break();
 					foreach (Locator entranceLocation in caveData.Template.Entrances)
 					{
 						caveData.Entrances.Add(new CaveEntranceData(caveData.RootComponent) { Location = entranceLocation });
@@ -505,7 +525,7 @@ namespace IcarusDataMiner.Miners
 
 					if (caveData.Template != null)
 					{
-						locators.Push(parseLocation(caveData.RootComponent));
+						locators.Push(caveData.Location);
 					}
 					else
 					{

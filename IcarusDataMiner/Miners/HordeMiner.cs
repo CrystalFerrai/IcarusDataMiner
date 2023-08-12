@@ -895,7 +895,7 @@ namespace IcarusDataMiner.Miners
 			{
 				int difficultyIndex = (int)difficulty;
 
-				string outputPath = Path.Combine(config.OutputDirectory, $"{Name}_Waves_{difficulty}.csv");
+				string outputPath = Path.Combine(config.OutputDirectory, Name, $"Waves_{difficulty}.csv");
 
 				using (FileStream outStream = IOUtil.CreateFile(outputPath, logger))
 				using (StreamWriter writer = new StreamWriter(outStream))
@@ -928,7 +928,7 @@ namespace IcarusDataMiner.Miners
 					}
 				}
 
-				outputPath = Path.Combine(config.OutputDirectory, $"{Name}_Rewards_{difficulty}.csv");
+				outputPath = Path.Combine(config.OutputDirectory, Name, $"Rewards_{difficulty}.csv");
 
 				using (FileStream outStream = IOUtil.CreateFile(outputPath, logger))
 				using (StreamWriter writer = new StreamWriter(outStream))

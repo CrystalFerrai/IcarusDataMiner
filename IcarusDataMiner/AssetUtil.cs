@@ -35,6 +35,10 @@ namespace IcarusDataMiner
 			{
 				packageName = $"Icarus/Content{packageName[5..]}.{extension}";
 			}
+			else
+			{
+				packageName = $"{packageName}.{extension}";
+			}
 			return packageName;
 		}
 

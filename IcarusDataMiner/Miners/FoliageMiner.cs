@@ -29,6 +29,10 @@ namespace IcarusDataMiner.Miners
 	/// <summary>
 	/// Mines location data for various foliage instances
 	/// </summary>
+	/// <remarks>
+	/// This miner takes a long time to run, so it is disabled by default. You must name it explicitly on the command line to run it.
+	/// </remarks>
+	[DefaultEnabled(false)]
 	internal class FoliageMiner : IDataMiner
 	{
 		// Foliage instances less than this distance apart will be grouped. Distance calculation based on Manhattan distance.
@@ -58,53 +62,115 @@ namespace IcarusDataMiner.Miners
 			// Refer to Data/FLOD/D_FLODDescriptions.json for all possible types
 			sPlantMap = new Dictionary<string, string>()
 			{
-				// NOTE: Commented out entries exist in the data but no instances have been found on any maps so not sure precisely what they are.
-				// Specualtion: They might be new crop types and variations coming in a future DLC.
+				// Variations with prefixes are intended to be biome-specific
+				// LC = lava cave
+				// SW = swamp
+				// TU = tundra
 
 				{ "FT_Alpine_Lily_01", "Lily" },
 
 				{ "FT_Beans", "Beans" },
-				//{ "FT_LC_Beans", "LC_Beans" },
+				{ "FT_LC_Beans", "Beans" },
+
+				{ "FT_BerryBush", "Berries" },
+				{ "FT_SW_Blackberry_Bush_01", "Berries" },
+				{ "FT_SW_Blackberry_Bush_02", "Berries" },
+				{ "FT_SW_Blackberry_Bush_03", "Berries" },
 
 				{ "FT_Carrot", "Carrot" },
 
 				{ "FT_Cocoa", "Cocoa" },
-				//{ "FT_LC_Cocoa", "LC_Cocoa" },
+				{ "FT_LC_Cocoa", "Cocoa" },
 
 				{ "FT_Coffee", "Coffee" },
 
 				// There are many instances of this, but sure what it actually is
 				//{ "FT_ConiferFlower_01", "Flower" },
 
-				// Corn cobs and corn stalks always appear in the same places and have the same loot so we combine them as just "Corn"
+				// Corn cobs can be found laying on the ground near corn stalks
 				{ "FT_CornCob_01", "Corn" },
 				{ "FT_CropCorn_01", "Corn" },
 
 				{ "FT_GreenTea", "GreenTea" },
 
-				//{ "FT_SW_Potato_Wild", "SW_Potato" },
-				//{ "FT_TU_Potato_Wild", "TU_Potato" },
+				{ "FT_SW_Potato_Wild", "Potato" },
+				{ "FT_TU_Potato_Wild", "Potato" },
+
+				{ "FT_MushroomA", "Mushroom" },
 
 				{ "FT_Pumpkin", "Pumpkin" },
-				//{ "FT_TU_Pumpkin", "TU_Pumpkin" },
+				{ "FT_TU_Pumpkin", "Pumpkin" },
 
 				{ "FT_ReedFlower_01", "Reed" },
 				
 				{ "FT_Sponge_01", "Sponge" },
 
 				{ "FT_Squash", "Squash" },
-				//{ "FT_LC_Squash", "LC_Squash" },
+				{ "FT_LC_Squash", "Squash" },
 
-				//{ "FT_Tomatoes_Wild", "Tomato" },
+				{ "FT_Tomatoes_Wild", "Tomato" },
 				
 				{ "FT_Watermelon", "Watermelon" },
 				
 				{ "FT_Wheat_03", "Wheat" },
 
 				{ "FT_WildTea", "WildTea" },
-				//{ "FT_LC_WildTea", "LC_WildTea" },
+				{ "FT_LC_WildTea", "WildTea" },
 
-				{ "FT_YeastPlant_01", "Yeast" }
+				{ "FT_YeastPlant_01", "Yeast" },
+
+				// The entries beyond this point are just for visualizing specific data that was of interest for one reason or another.
+				// These are not typical harvestable plants like the rest of the list.
+
+				{ "FT_Breakable_Scoria_Var1", "Scoria" },
+				{ "FT_Breakable_Scoria_Var2", "Scoria" },
+				{ "FT_Breakable_Scoria_Var3", "Scoria" },
+				
+				{ "FT_Breakable_Clay_Var1", "Clay" },
+				{ "FT_Breakable_Clay_Var2", "Clay" },
+
+				{ "FT_Breakable_Obsidian_Var1", "Obsidian" },
+				{ "FT_Breakable_Obsidian_Var2", "Obsidian" },
+
+				// Trees and fiber in lava cave biomes
+				{ "FT_LC_Bulbous_Flax_Var1", "LC_Flax" },
+				{ "FT_LC_Bulbous_Flax_Var2", "LC_Flax" },
+				{ "FT_LC_Bulbous_Flax_Var3", "LC_Flax" },
+				{ "FT_LC_Sapling_A_Var1", "LC_Sapling" },
+				{ "FT_LC_Sapling_A_Var2", "LC_Sapling" },
+				{ "FT_LC_Sapling_A_Var3", "LC_Sapling" },
+				{ "FT_LC_Sapling_A_Var4", "LC_Sapling" },
+				{ "FT_LC_JoshuaTree_Var1", "LC_Trees" },
+				{ "FT_LC_JoshuaTree_Var2", "LC_Trees" },
+				{ "FT_LC_JoshuaTree_Var3", "LC_Trees" },
+				{ "FT_LC_SucculentTree_Var1", "LC_Trees" },
+				{ "FT_LC_SucculentTree_Var2", "LC_Trees" },
+				{ "FT_LC_SucculentTree_Var3", "LC_Trees" },
+
+				// Resource pickups
+				{ "FT_GenericTwig", "Pickup_Wood" },
+				{ "FT_GenericTwig2", "Pickup_Wood" },
+
+				{ "FT_AC_Stone_1", "Pickup_Stone" },
+				{ "FT_AC_Stone_2", "Pickup_Stone" },
+				{ "FT_AC_Stone_3", "Pickup_Stone" },
+				{ "FT_AC_Stone_4", "Pickup_Stone" },
+				{ "FT_CF_Stone_01", "Pickup_Stone" },
+				{ "FT_CF_Stone_02", "Pickup_Stone" },
+				{ "FT_CF_Stone_03", "Pickup_Stone" },
+				{ "FT_CF_Stone_04", "Pickup_Stone" },
+				{ "FT_DC_Stone_01", "Pickup_Stone" },
+				{ "FT_DC_Stone_02", "Pickup_Stone" },
+				{ "FT_DC_Stone_03", "Pickup_Stone" },
+				{ "FT_DC_Stone_04", "Pickup_Stone" },
+				{ "FT_LC_Stone_01", "Pickup_Stone" },
+				{ "FT_LC_Stone_02", "Pickup_Stone" },
+				{ "FT_LC_Stone_03", "Pickup_Stone" },
+				{ "FT_LC_Stone_04", "Pickup_Stone" },
+
+				{ "FT_GEN_Oxite_01", "Pickup_Oxite" },
+				{ "FT_GEN_Oxite_02", "Pickup_Oxite" },
+				{ "FT_GEN_Oxite_03", "Pickup_Oxite" }
 			};
 		}
 
@@ -195,7 +261,7 @@ namespace IcarusDataMiner.Miners
 		private void ExportData(string mapName, Dictionary<string, FoliageData> foliageData, Config config, Logger logger)
 		{
 			// The first output is for code parsing and DB importing for IcarusIntel
-			string outPath = Path.Combine(config.OutputDirectory, $"{Name}_{mapName}.csv");
+			string outPath = Path.Combine(config.OutputDirectory, Name, "Data", $"{mapName}.csv");
 
 			using (FileStream outStream = IOUtil.CreateFile(outPath, logger))
 			using (StreamWriter writer = new StreamWriter(outStream))
@@ -212,7 +278,7 @@ namespace IcarusDataMiner.Miners
 			}
 
 			// The second output is meant to be human readable
-			outPath = Path.Combine(config.OutputDirectory, $"{Name}_{mapName}_Readable.csv");
+			outPath = Path.Combine(config.OutputDirectory, Name, "Data", $"{mapName}_Readable.csv");
 
 			using (FileStream outStream = IOUtil.CreateFile(outPath, logger))
 			using (StreamWriter writer = new StreamWriter(outStream))
@@ -251,65 +317,16 @@ namespace IcarusDataMiner.Miners
 
 		private void ExportImages(string mapName, IProviderManager providerManager, WorldData worldData, IReadOnlyDictionary<string, FoliageData> foliageData, Config config, Logger logger)
 		{
-			float offsetX = worldData.MinimapData!.WorldBoundaryMin.X;
-			float offsetY = worldData.MinimapData!.WorldBoundaryMin.Y;
-
-			float mapWidth = worldData.MinimapData.WorldBoundaryMax.X - offsetX;
-			float mapHeight = worldData.MinimapData.WorldBoundaryMax.Y - offsetY;
-
-			float scaleX = (float)(1.0f / WorldDataUtil.MapToWorld);
-			float scaleY = (float)(1.0f / WorldDataUtil.MapToWorld);
-
-			UTexture2D? firstTileTexture = AssetUtil.LoadTexture(worldData.MinimapData!.MapTextures[0], providerManager.AssetProvider);
-			if (firstTileTexture != null)
-			{
-				scaleX = (float)firstTileTexture.SizeX / (float)WorldDataUtil.WorldTileSize;
-				scaleY = (float)firstTileTexture.SizeY / (float)WorldDataUtil.WorldTileSize;
-			}
-
-			int imageWidth = (int)Math.Ceiling(mapWidth * scaleX);
-			int imageHeight = (int)Math.Ceiling(mapHeight * scaleY);
-
-			SKImageInfo surfaceInfo = new()
-			{
-				Width = imageWidth,
-				Height = imageHeight,
-				ColorSpace = SKColorSpace.CreateSrgb(),
-				ColorType = SKColorType.Rgba8888,
-				AlphaType = SKAlphaType.Premul
-			};
-
+			MapOverlayBuilder mapBuilder = MapOverlayBuilder.Create(worldData, providerManager.AssetProvider);
 			foreach (var pair in foliageData)
 			{
 				logger.Log(LogLevel.Debug, $"Generating image for {pair.Key}");
 
-				SKData outData;
-				using (SKSurface surface = SKSurface.Create(surfaceInfo))
-				{
-					SKCanvas canvas = surface.Canvas;
-					using SKPaint paint = new SKPaint()
-					{
-						Color = SKColors.White,
-						IsStroke = false,
-						IsAntialias = true,
-						Style = SKPaintStyle.Fill
-					};
+				mapBuilder.AddLocations(pair.Value.Clusters!.Select(c => new MapLocation(new FVector(c.CenterX, c.CenterY, 0.0f), Math.Min((float)Math.Log2(c.Count) + 3.0f, 10.0f))));
+				SKData outData = mapBuilder.DrawOverlay();
+				mapBuilder.ClearLocations();
 
-					canvas.DrawCircle(0.0f, 0.0f, 1.0f, paint);
-					canvas.DrawCircle(imageWidth - 1.0f, imageHeight - 1.0f, 1.0f, paint);
-
-					foreach (Cluster cluster in pair.Value.Clusters!)
-					{
-						float radius = Math.Min((float)Math.Log2(cluster.Count) + 3.0f, 10.0f);
-						canvas.DrawCircle((cluster.CenterX - offsetX) * scaleX, (cluster.CenterY - offsetY) * scaleY, radius, paint);
-					}
-
-					surface.Flush();
-					SKImage image = surface.Snapshot();
-					outData = image.Encode(SKEncodedImageFormat.Png, 100);
-				}
-
-				string outDir = Path.Combine(config.OutputDirectory, Name);
+				string outDir = Path.Combine(config.OutputDirectory, Name, "Visual");
 				Directory.CreateDirectory(outDir);
 				string outPath = Path.Combine(outDir, $"{mapName}_{pair.Key}.png");
 				using (FileStream outStream = IOUtil.CreateFile(outPath, logger))

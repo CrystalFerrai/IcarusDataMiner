@@ -18,6 +18,7 @@ using CUE4Parse.UE4.Assets.Exports;
 using CUE4Parse.UE4.Assets.Objects;
 using CUE4Parse.UE4.Objects.Core.Math;
 using CUE4Parse.UE4.Objects.UObject;
+using SkiaSharp;
 using System.Text.RegularExpressions;
 
 namespace IcarusDataMiner.Miners
@@ -62,15 +63,33 @@ namespace IcarusDataMiner.Miners
 
 			if (geysers.Count > 0)
 			{
-				string outCustomPath = Path.Combine(config.OutputDirectory, $"{Name}_{mapAsset.NameWithoutExtension}.csv");
-				using (FileStream outStream = IOUtil.CreateFile(outCustomPath, logger))
-				using (StreamWriter writer = new StreamWriter(outStream))
+				// CSV
 				{
-					writer.WriteLine("ID,Type,Location X,Location Y,Location Z,Grid");
-
-					foreach (GeyserData geyser in geysers)
+					string outCustomPath = Path.Combine(config.OutputDirectory, Name, $"{mapAsset.NameWithoutExtension}.csv");
+					using (FileStream outStream = IOUtil.CreateFile(outCustomPath, logger))
+					using (StreamWriter writer = new StreamWriter(outStream))
 					{
-						writer.WriteLine($"{geyser.ID},{geyser.Type.Text[0..geyser.Type.Text.LastIndexOf('_')]},{geyser.Location.X},{geyser.Location.Y},{geyser.Location.Z},{worldData.GetGridCell(geyser.Location)}");
+						writer.WriteLine("ID,Type,Location X,Location Y,Location Z,Grid");
+
+						foreach (GeyserData geyser in geysers)
+						{
+							int geyserCharIndex = geyser.Type.Text.LastIndexOf('_');
+							if (geyserCharIndex < 0) geyserCharIndex = geyser.Type.Text.Length;
+							writer.WriteLine($"{geyser.ID},{geyser.Type.Text[0..geyserCharIndex]},{geyser.Location.X},{geyser.Location.Y},{geyser.Location.Z},{worldData.GetGridCell(geyser.Location)}");
+						}
+					}
+				}
+
+				// Image
+				{
+					MapOverlayBuilder mapBuilder = MapOverlayBuilder.Create(worldData, providerManager.AssetProvider);
+					mapBuilder.AddLocations(geysers.Select(d => new MapLocation(d.Location, 5.0f)));
+					SKData outData = mapBuilder.DrawOverlay();
+
+					string outPath = Path.Combine(config.OutputDirectory, Name, $"{mapAsset.NameWithoutExtension}.png");
+					using (FileStream outStream = IOUtil.CreateFile(outPath, logger))
+					{
+						outData.SaveTo(outStream);
 					}
 				}
 			}
@@ -126,7 +145,7 @@ namespace IcarusDataMiner.Miners
 					continue;
 				}
 
-				GeyserData geyserData = new GeyserData();
+				GeyserData geyserData = new();
 				geyserData.ID = match.Groups[1].Value.Length > 0 ? int.Parse(match.Groups[1].Value) : 1;
 
 				for (int i = 0; i < geyserObject.Properties.Count; ++i)

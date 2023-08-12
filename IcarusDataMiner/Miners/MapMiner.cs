@@ -13,10 +13,7 @@
 // limitations under the License.
 
 using CUE4Parse.FileProvider;
-using CUE4Parse.UE4.Assets;
-using CUE4Parse.UE4.Assets.Exports;
 using CUE4Parse.UE4.Assets.Exports.Texture;
-using CUE4Parse.UE4.Objects.UObject;
 using CUE4Parse_Conversion.Textures;
 using SkiaSharp;
 
@@ -162,6 +159,16 @@ namespace IcarusDataMiner.Miners
 			{
 				logger.Log(LogLevel.Warning, $"Failed to decode texture '{name}'");
 			}
+			else if (!texture.SRGB)
+			{
+				SKColor[] pixels = bitmap.Pixels;
+				for (int i = 0; i < pixels.Length; ++i)
+				{
+					pixels[i] = ColorUtil.LinearToSrgb(pixels[i]);
+				}
+				bitmap.Pixels = pixels;
+			}
+
 			return bitmap;
 		}
 

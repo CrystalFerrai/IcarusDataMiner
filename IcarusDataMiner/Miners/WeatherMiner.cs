@@ -14,6 +14,7 @@
 
 using CUE4Parse.FileProvider;
 using CUE4Parse.UE4.Assets.Exports.Texture;
+using CUE4Parse.UE4.Objects.Core.Math;
 using CUE4Parse.UE4.Readers;
 using CUE4Parse_Conversion.Textures;
 using Newtonsoft.Json;
@@ -32,9 +33,9 @@ namespace IcarusDataMiner.Miners
 		private const int BarSpacing = 4;
 		private const int TierIconSize = 48;
 
-		private static readonly SKColor BackgroundColor = new SKColor(0xff101010);
-		private static readonly SKColor LineColor = new SKColor(0x80f0f0f0);
-		private static readonly SKColor TextColor = new SKColor(0xfff0f0f0);
+		private static readonly SKColor BackgroundColor = new(0xff101010);
+		private static readonly SKColor LineColor = new(0x80f0f0f0);
+		private static readonly SKColor TextColor = new(0xfff0f0f0);
 
 		private static readonly SKTypeface TitleTypeFace = SKTypeface.FromFamilyName("Segoe UI", SKFontStyleWeight.Bold, SKFontStyleWidth.Normal, SKFontStyleSlant.Upright);
 		private const float TitleTextSize = 24.0f;
@@ -142,9 +143,7 @@ namespace IcarusDataMiner.Miners
 				outData = image.Encode(SKEncodedImageFormat.Png, 100);
 			}
 
-			string outDir = Path.Combine(config.OutputDirectory, Name);
-			Directory.CreateDirectory(outDir);
-			string outPath = Path.Combine(outDir, "Legend.png");
+			string outPath = Path.Combine(config.OutputDirectory, Name, "Legend.png");
 			using (FileStream outStream = IOUtil.CreateFile(outPath, logger))
 			{
 				outData.SaveTo(outStream);
@@ -286,9 +285,7 @@ namespace IcarusDataMiner.Miners
 					outData = image.Encode(SKEncodedImageFormat.Png, 100);
 				}
 
-				string outDir = Path.Combine(config.OutputDirectory, Name, "Forecasts");
-				Directory.CreateDirectory(outDir);
-				string outPath = Path.Combine(outDir, $"{row.Name}.png");
+				string outPath = Path.Combine(config.OutputDirectory, Name, "Forecasts", $"{row.Name}.png");
 				using (FileStream outStream = IOUtil.CreateFile(outPath, logger))
 				{
 					outData.SaveTo(outStream);
@@ -306,7 +303,7 @@ namespace IcarusDataMiner.Miners
 			IReadOnlyDictionary<string, WeatherActionData> actionMap = LoadWeatherActions(providerManager, logger);
 			IReadOnlyList<WeatherEvent> events = LoadWeatherEvents(actionMap, providerManager, logger);
 
-			using SKPaint linePaint = new SKPaint()
+			using SKPaint linePaint = new()
 			{
 				Color = LineColor,
 				IsStroke = true,
@@ -314,7 +311,7 @@ namespace IcarusDataMiner.Miners
 				Style = SKPaintStyle.Stroke
 			};
 
-			using SKPaint titlePaint = new SKPaint()
+			using SKPaint titlePaint = new()
 			{
 				Color = TextColor,
 				IsAntialias = true,
@@ -324,7 +321,7 @@ namespace IcarusDataMiner.Miners
 				TextAlign = SKTextAlign.Left
 			};
 
-			using SKPaint title2Paint = new SKPaint()
+			using SKPaint title2Paint = new()
 			{
 				Color = TextColor,
 				IsAntialias = true,
@@ -334,7 +331,7 @@ namespace IcarusDataMiner.Miners
 				TextAlign = SKTextAlign.Left
 			};
 
-			using SKPaint bodyPaint = new SKPaint()
+			using SKPaint bodyPaint = new()
 			{
 				Color = TextColor,
 				IsAntialias = true,
@@ -344,7 +341,7 @@ namespace IcarusDataMiner.Miners
 				TextAlign = SKTextAlign.Center
 			};
 
-			using SKPaint tierPaint = new SKPaint()
+			using SKPaint tierPaint = new()
 			{
 				Color = TextColor,
 				IsAntialias = true,
@@ -357,7 +354,7 @@ namespace IcarusDataMiner.Miners
 			Dictionary<string, SKPaint> paints = new();
 			foreach (WeatherActionData action in actionMap.Values)
 			{
-				paints.Add(action.Name!, new SKPaint()
+				paints.Add(action.Name!, new()
 				{
 					Color = action.Color.GetColor(2.0f),
 					IsStroke = false,
@@ -426,9 +423,7 @@ namespace IcarusDataMiner.Miners
 					outData = image.Encode(SKEncodedImageFormat.Png, 100);
 				}
 
-				string outDir = Path.Combine(config.OutputDirectory, Name, "Storms");
-				Directory.CreateDirectory(outDir);
-				string outPath = Path.Combine(outDir, $"{storm.Tier}_{storm.Name}.png");
+				string outPath = Path.Combine(config.OutputDirectory, Name, "Storms", $"{storm.Tier}_{storm.Name}.png");
 				using (FileStream outStream = IOUtil.CreateFile(outPath, logger))
 				{
 					outData.SaveTo(outStream);
@@ -455,7 +450,7 @@ namespace IcarusDataMiner.Miners
 				int objectDepth = 0, colorDepth = 0;
 
 				WeatherActionData action = new();
-				LinearColor color = new();
+				FLinearColor color = new();
 
 				while (state != WeatherActionParseState.Done && reader.Read())
 				{
@@ -834,37 +829,16 @@ namespace IcarusDataMiner.Miners
 
 		private struct SlateColor
 		{
-			public LinearColor SpecifiedColor;
+			public FLinearColor SpecifiedColor;
 
 			public SlateColor()
 			{
-				SpecifiedColor = new LinearColor();
+				SpecifiedColor = new FLinearColor();
 			}
 
 			public SKColor GetColor(float opacity)
 			{
-				return new SKColor(LinearToSrgb(SpecifiedColor.R), LinearToSrgb(SpecifiedColor.G), LinearToSrgb(SpecifiedColor.B), (byte)(SpecifiedColor.A * opacity * 255.0f));
-			}
-
-			private static byte LinearToSrgb(float linear)
-			{
-				if (linear <= 0.0f) return 0;
-				if (linear <= 0.00313066844250063f) return (byte)(linear * 12.92f * 255.0f);
-				if (linear < 1) return (byte)((1.055f * Math.Pow(linear, 1.0f / 2.4f) - 0.055f) * 255.0f);
-				return 255;
-			}
-		}
-
-		private struct LinearColor
-		{
-			public float R;
-			public float G;
-			public float B;
-			public float A;
-
-			public LinearColor()
-			{
-				R = G = B = A = 0.0f;
+				return ColorUtil.ToSKColor(SpecifiedColor, (byte)(SpecifiedColor.A * opacity * 255.0f));
 			}
 		}
 

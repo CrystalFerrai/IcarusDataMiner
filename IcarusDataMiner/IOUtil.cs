@@ -30,6 +30,7 @@ namespace IcarusDataMiner
 			{
 				try
 				{
+					Directory.CreateDirectory(Path.GetDirectoryName(path)!);
 					return File.Create(path);
 				}
 				catch (IOException ex)

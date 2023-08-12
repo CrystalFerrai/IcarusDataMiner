@@ -15,7 +15,6 @@
 using CUE4Parse.FileProvider;
 using CUE4Parse.UE4.Assets;
 using CUE4Parse.UE4.Assets.Exports;
-using CUE4Parse.UE4.Assets.Exports.Texture;
 using CUE4Parse.UE4.Assets.Objects;
 using CUE4Parse.UE4.Objects.Core.Math;
 using CUE4Parse.UE4.Objects.UObject;
@@ -26,6 +25,10 @@ namespace IcarusDataMiner.Miners
 	/// <summary>
 	/// Mines location data for various voxel instances
 	/// </summary>
+	/// <remarks>
+	/// This miner takes a long time to run, so it is disabled by default. You must name it explicitly on the command line to run it.
+	/// </remarks>
+	[DefaultEnabled(false)]
 	internal class VoxelMiner : IDataMiner
 	{
 		private static readonly HashSet<string> sActorNames;
@@ -94,7 +97,7 @@ namespace IcarusDataMiner.Miners
 
 		private void ExportData(string mapName, Dictionary<string, List<FVector>> voxelMap, Config config, Logger logger)
 		{
-			string outPath = Path.Combine(config.OutputDirectory, $"{Name}_{mapName}.csv");
+			string outPath = Path.Combine(config.OutputDirectory, Name, "Data", $"{mapName}.csv");
 
 			using (FileStream outStream = IOUtil.CreateFile(outPath, logger))
 			using (StreamWriter writer = new(outStream))
@@ -113,73 +116,16 @@ namespace IcarusDataMiner.Miners
 
 		private void ExportImages(string mapName, IProviderManager providerManager, WorldData worldData, Dictionary<string, List<FVector>> voxelMap, Config config, Logger logger)
 		{
-			float offsetX = worldData.MinimapData!.WorldBoundaryMin.X;
-			float offsetY = worldData.MinimapData!.WorldBoundaryMin.Y;
-
-			float mapWidth = worldData.MinimapData.WorldBoundaryMax.X - offsetX;
-			float mapHeight = worldData.MinimapData.WorldBoundaryMax.Y - offsetY;
-
-			float scaleX = (float)(1.0f / WorldDataUtil.MapToWorld);
-			float scaleY = (float)(1.0f / WorldDataUtil.MapToWorld);
-
-			UTexture2D? firstTileTexture = AssetUtil.LoadTexture(worldData.MinimapData!.MapTextures[0], providerManager.AssetProvider);
-			if (firstTileTexture != null)
-			{
-				scaleX = (float)firstTileTexture.SizeX / (float)WorldDataUtil.WorldTileSize;
-				scaleY = (float)firstTileTexture.SizeY / (float)WorldDataUtil.WorldTileSize;
-			}
-
-			int imageWidth = (int)Math.Ceiling(mapWidth * scaleX);
-			int imageHeight = (int)Math.Ceiling(mapHeight * scaleY);
-
-			SKImageInfo surfaceInfo = new()
-			{
-				Width = imageWidth,
-				Height = imageHeight,
-				ColorSpace = SKColorSpace.CreateSrgb(),
-				ColorType = SKColorType.Rgba8888,
-				AlphaType = SKAlphaType.Premul
-			};
-
+			MapOverlayBuilder mapBuilder = MapOverlayBuilder.Create(worldData, providerManager.AssetProvider);
 			foreach (var pair in voxelMap)
 			{
 				logger.Log(LogLevel.Debug, $"Generating image for {pair.Key}");
 
-				SKData outData;
-				using (SKSurface surface = SKSurface.Create(surfaceInfo))
-				{
-					SKCanvas canvas = surface.Canvas;
-					using SKPaint paint = new SKPaint()
-					{
-						Color = SKColors.White,
-						IsStroke = false,
-						IsAntialias = true,
-						Style = SKPaintStyle.Fill
-					};
+				mapBuilder.AddLocations(pair.Value.Select(l => new MapLocation(l, 3.0f))); // Chaange radius from 3 to 1 if wanting to count voxels on map
+				SKData outData = mapBuilder.DrawOverlay();
+				mapBuilder.ClearLocations();
 
-					canvas.DrawCircle(0.0f, 0.0f, 1.0f, paint);
-					canvas.DrawCircle(imageWidth - 1.0f, imageHeight - 1.0f, 1.0f, paint);
-
-					foreach (FVector location in pair.Value)
-					{
-						float radius = 3.0f;
-						canvas.DrawCircle((location.X - offsetX) * scaleX, (location.Y - offsetY) * scaleY, radius, paint);
-					}
-
-					// Single pixel output variant for ore counting purposes
-					//foreach (FVector location in pair.Value)
-					//{
-					//	canvas.DrawPoint((float)Math.Floor((location.X - offsetX) * scaleX) + 0.5f, (float)Math.Round((location.Y - offsetY) * scaleY) + 0.5f, paint);
-					//}
-
-					surface.Flush();
-					SKImage image = surface.Snapshot();
-					outData = image.Encode(SKEncodedImageFormat.Png, 100);
-				}
-
-				string outDir = Path.Combine(config.OutputDirectory, Name);
-				Directory.CreateDirectory(outDir);
-				string outPath = Path.Combine(outDir, $"{mapName}_{pair.Key}.png");
+				string outPath = Path.Combine(config.OutputDirectory, Name, "Visual", $"{mapName}_{pair.Key}.png");
 				using (FileStream outStream = IOUtil.CreateFile(outPath, logger))
 				{
 					outData.SaveTo(outStream);

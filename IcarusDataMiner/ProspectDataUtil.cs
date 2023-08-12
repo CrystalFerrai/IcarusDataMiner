@@ -36,7 +36,7 @@ namespace IcarusDataMiner
 		public IReadOnlyDictionary<string, string> ActiveProspects => mActiveProspects ?? throw new InvalidOperationException("Util not initialized");
 
 		/// <summary>
-		/// GEts a map of prospect tiers to prospect data
+		/// Gets a map of prospect tiers to prospect data
 		/// </summary>
 		public IReadOnlyDictionary<string, IList<ProspectData>> ProspectsByTier => mProspectsByTier ?? throw new InvalidOperationException("Util not initialized");
 
@@ -72,7 +72,7 @@ namespace IcarusDataMiner
 
 			GameFile file = dataProvider.Files["Talents/D_Talents.json"];
 			using (FArchive archive = file.CreateReader())
-			using (StreamReader stream = new StreamReader(archive))
+			using (StreamReader stream = new(archive))
 			using (JsonReader reader = new JsonTextReader(stream))
 			{
 				TalentParseState state = TalentParseState.SearchingForRows;
@@ -328,6 +328,11 @@ namespace IcarusDataMiner
 								{
 									state = ProspectParseState.InForecast;
 								}
+								else if (reader.Value!.Equals("AISpawnConfigOverride"))
+								{
+									difficultyArrayDepth = reader.Depth + 1;
+									state = ProspectParseState.InSpawnConfigOverride;
+								}
 								else if (reader.Value!.Equals("DifficultySetup"))
 								{
 									difficultyArrayDepth = reader.Depth + 1;
@@ -468,6 +473,19 @@ namespace IcarusDataMiner
 								state = ProspectParseState.InObject;
 							}
 							break;
+						case ProspectParseState.InSpawnConfigOverride:
+							if (reader.TokenType == JsonToken.PropertyName)
+							{
+								if (reader.Value!.Equals("RowName"))
+								{
+									prospectData.AISpawnConfigOverride = reader.ReadAsString();
+								}
+							}
+							if (reader.TokenType == JsonToken.EndObject && reader.Depth == objectDepth)
+							{
+								state = ProspectParseState.InObject;
+							}
+							break;
 						case ProspectParseState.InDifficultyArray:
 							if (reader.TokenType == JsonToken.PropertyName)
 							{
@@ -552,6 +570,7 @@ namespace IcarusDataMiner
 			InDuration,
 			InMetaDeposits,
 			InForecast,
+			InSpawnConfigOverride,
 			InDifficultyArray,
 			InDifficulty,
 			InDifficultyForecast,
@@ -584,6 +603,8 @@ namespace IcarusDataMiner
 		public string? Forecast { get; set; }
 
 		public string?[] ForecastOverrides { get; }
+
+		public string? AISpawnConfigOverride { get; set; }
 
 		public ProspectData()
 		{

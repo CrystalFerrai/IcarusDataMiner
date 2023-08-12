@@ -18,6 +18,7 @@ using CUE4Parse.UE4.Assets.Exports;
 using CUE4Parse.UE4.Assets.Objects;
 using CUE4Parse.UE4.Objects.Core.Math;
 using CUE4Parse.UE4.Objects.UObject;
+using SkiaSharp;
 
 namespace IcarusDataMiner.Miners
 {
@@ -79,7 +80,7 @@ namespace IcarusDataMiner.Miners
 				}
 			}
 
-			List<DepositInfo> deposits = new List<DepositInfo>();
+			List<DepositInfo> deposits = new();
 
 			foreach (FObjectExport? export in mapPackage.ExportMap)
 			{
@@ -117,14 +118,30 @@ namespace IcarusDataMiner.Miners
 			{
 				deposits.Sort();
 
-				string outputPath = Path.Combine(config.OutputDirectory, $"{Name}_{mapAsset.NameWithoutExtension}.csv");
-				using (FileStream outStream = IOUtil.CreateFile(outputPath, logger))
-				using (StreamWriter writer = new StreamWriter(outStream))
+				// CSV
 				{
-					writer.WriteLine("Name,LocationX,LocationY,LocationZ,Map");
-					foreach (var node in deposits)
+					string outputPath = Path.Combine(config.OutputDirectory, Name, $"{mapAsset.NameWithoutExtension}.csv");
+					using (FileStream outStream = IOUtil.CreateFile(outputPath, logger))
+					using (StreamWriter writer = new StreamWriter(outStream))
 					{
-						writer.WriteLine($"{node.Name},{node.Location.X},{node.Location.Y},{node.Location.Z},{worldData.GetGridCell(node.Location)}");
+						writer.WriteLine("Name,LocationX,LocationY,LocationZ,Map");
+						foreach (var node in deposits)
+						{
+							writer.WriteLine($"{node.Name},{node.Location.X},{node.Location.Y},{node.Location.Z},{worldData.GetGridCell(node.Location)}");
+						}
+					}
+				}
+
+				// Image
+				{
+					MapOverlayBuilder mapBuilder = MapOverlayBuilder.Create(worldData, providerManager.AssetProvider);
+					mapBuilder.AddLocations(deposits.Select(d => new MapLocation(d.Location, 5.0f)));
+					SKData outData = mapBuilder.DrawOverlay();
+
+					string outPath = Path.Combine(config.OutputDirectory, Name, $"{mapAsset.NameWithoutExtension}.png");
+					using (FileStream outStream = IOUtil.CreateFile(outPath, logger))
+					{
+						outData.SaveTo(outStream);
 					}
 				}
 			}

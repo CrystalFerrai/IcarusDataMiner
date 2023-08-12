@@ -13,12 +13,24 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <None Remove="Resources\icon_cave.png" />
+    <None Remove="Resources\icon_exotic.png" />
+    <None Remove="Resources\icon_redexotic.png" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\CUE4Parse\CUE4Parse-Conversion\CUE4Parse-Conversion.csproj">
       <CopyLocal>True</CopyLocal>
     </ProjectReference>
     <ProjectReference Include="..\CUE4Parse\CUE4Parse\CUE4Parse.csproj">
       <CopyLocal>True</CopyLocal>
     </ProjectReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\icon_cave.png" />
+    <EmbeddedResource Include="Resources\icon_exotic.png" />
+    <EmbeddedResource Include="Resources\icon_redexotic.png" />
   </ItemGroup>
 
 </Project>

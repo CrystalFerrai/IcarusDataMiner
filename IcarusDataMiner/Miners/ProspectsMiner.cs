@@ -12,10 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-using CUE4Parse.FileProvider;
-using CUE4Parse.UE4.Readers;
-using Newtonsoft.Json;
-
 namespace IcarusDataMiner.Miners
 {
 	/// <summary>
@@ -51,24 +47,6 @@ namespace IcarusDataMiner.Miners
 					}
 				}
 			}
-		}
-
-		private enum ProspectParseState
-		{
-			SearchingForDefaults,
-			InDefaults,
-			InDefaultForecast,
-			SearchingForRows,
-			InRows,
-			InObject,
-			InDuration,
-			InMetaDeposits,
-			InForecast,
-			InDifficultyArray,
-			InDifficulty,
-			InDifficultyForecast,
-			ExitObject,
-			Done
 		}
 
 		private static string SerializeProspect(ProspectData prospect)

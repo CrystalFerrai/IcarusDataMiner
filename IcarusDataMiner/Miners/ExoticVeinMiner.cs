@@ -15,10 +15,11 @@
 using CUE4Parse.FileProvider;
 using CUE4Parse.UE4.Assets;
 using CUE4Parse.UE4.Assets.Exports;
+using CUE4Parse.UE4.Assets.Exports.Texture;
 using CUE4Parse.UE4.Assets.Objects;
 using CUE4Parse.UE4.Objects.Core.Math;
 using CUE4Parse.UE4.Objects.UObject;
-using System.IO.Enumeration;
+using SkiaSharp;
 
 namespace IcarusDataMiner.Miners
 {
@@ -86,7 +87,8 @@ namespace IcarusDataMiner.Miners
 				}
 			}
 
-			List<ExoticNodeInfo> exoticNodes = new List<ExoticNodeInfo>();
+			List<ExoticNodeInfo> exoticNodes = new();
+			List<ExoticNodeInfo> redExoticNodes = new();
 
 			foreach (FObjectExport? export in mapPackage.ExportMap)
 			{
@@ -104,7 +106,7 @@ namespace IcarusDataMiner.Miners
 						IPropertyHolder spawnIdentifierProperty = PropertyUtil.GetByIndex<IPropertyHolder>(veinObject, i);
 						FName value = PropertyUtil.Get<FName>(spawnIdentifierProperty, "Value");
 
-						node.SpawnIdentifier = value.Text[(value.Text.IndexOf('_') + 1)..];
+						node.SpawnIdentifier = value.Text;// [(value.Text.IndexOf('_') + 1)..];
 					}
 					else if (prop.Name.Index == rootComponentIndex)
 					{
@@ -130,33 +132,64 @@ namespace IcarusDataMiner.Miners
 						switch (nodeType)
 						{
 							case "MetaDeposit_Arctic":
-								node.ExtractorCount = 2;
-								break;
 							case "MetaDeposit_Conifer":
-								node.ExtractorCount = 3;
-								break;
 							case "MetaDeposit_Desert":
-								node.ExtractorCount = 2;
+								node.IsRed = false;
+								break;
+							case "MetaDeposit_Volcanic":
+								node.IsRed = true;
 								break;
 						}
 					}
 				}
 
-				exoticNodes.Add(node);
+				if (node.SpawnIdentifier.Equals("None")) continue;
+
+				if (node.IsRed)
+				{
+					redExoticNodes.Add(node);
+				}
+				else
+				{
+					exoticNodes.Add(node);
+				}
 			}
 
-			if (exoticNodes.Count > 0)
+			if (exoticNodes.Count > 0 || redExoticNodes.Count > 0)
 			{
 				exoticNodes.Sort();
+				redExoticNodes.Sort();
 
-				string outputPath = Path.Combine(config.OutputDirectory, $"{Name}_{mapAsset.NameWithoutExtension}.csv");
-				using (FileStream outStream = IOUtil.CreateFile(outputPath, logger))
-				using (StreamWriter writer = new StreamWriter(outStream))
+				// CSV
 				{
-					writer.WriteLine("Node ID,LocationX,LocationY,Map,Extractors");
-					foreach (var node in exoticNodes)
+					string outputPath = Path.Combine(config.OutputDirectory, Name, $"{mapAsset.NameWithoutExtension}.csv");
+					using (FileStream outStream = IOUtil.CreateFile(outputPath, logger))
+					using (StreamWriter writer = new(outStream))
 					{
-						writer.WriteLine($"{node.SpawnIdentifier},{node.Location.X},{node.Location.Y},{worldData.GetGridCell(node.Location)},{node.ExtractorCount}");
+						writer.WriteLine("Node ID,LocationX,LocationY,Map");
+						foreach (var node in exoticNodes)
+						{
+							writer.WriteLine($"{node.SpawnIdentifier},{node.Location.X},{node.Location.Y},{worldData.GetGridCell(node.Location)}");
+						}
+						writer.WriteLine(",,,");
+						foreach (var node in redExoticNodes)
+						{
+							writer.WriteLine($"{node.SpawnIdentifier},{node.Location.X},{node.Location.Y},{worldData.GetGridCell(node.Location)}");
+						}
+					}
+				}
+
+				// Image
+				{
+					MapOverlayBuilder mapBuilder = MapOverlayBuilder.Create(worldData, providerManager.AssetProvider);
+					mapBuilder.AddLocations(exoticNodes.Select(n => new MapLocation(n.Location)), Resources.Icon_Exotic);
+					mapBuilder.AddLocations(redExoticNodes.Select(n => new MapLocation(n.Location)), Resources.Icon_RedExotic);
+					SKData outData = mapBuilder.DrawOverlay();
+
+					string outPath = Path.Combine(config.OutputDirectory, Name, $"{mapAsset.NameWithoutExtension}.png");
+					using (FileStream outStream = IOUtil.CreateFile(outPath, logger))
+					{
+						outData.SaveTo(outStream);
 					}
 				}
 			}
@@ -164,16 +197,28 @@ namespace IcarusDataMiner.Miners
 
 		private class ExoticNodeInfo : IComparable<ExoticNodeInfo>
 		{
-#nullable disable annotations
-			public string SpawnIdentifier { get; set; }
-#nullable restore annotations
+			private const string DefaultIdentifier = "None";
+
+			public string SpawnIdentifier { get; set; } = DefaultIdentifier;
 
 			public FVector Location { get; set; }
 
-			public int ExtractorCount { get; set; }
+			public bool IsRed { get; set; }
 
 			public int CompareTo(ExoticNodeInfo? other)
 			{
+				if (other is null) return 1;
+
+				if (SpawnIdentifier.Equals(DefaultIdentifier))
+				{
+					return other!.SpawnIdentifier.Equals(DefaultIdentifier) ? 0 : -1;
+				}
+
+				if (other!.SpawnIdentifier.Equals(DefaultIdentifier))
+				{
+					return 1;
+				}
+
 				return SpawnIdentifier.CompareTo(other!.SpawnIdentifier);
 			}
 
