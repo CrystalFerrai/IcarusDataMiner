@@ -13,10 +13,8 @@
 // limitations under the License.
 
 using CUE4Parse.FileProvider;
-using CUE4Parse.UE4.Assets.Exports.Texture;
 using CUE4Parse.UE4.Objects.Core.Math;
 using CUE4Parse.UE4.Readers;
-using CUE4Parse_Conversion.Textures;
 using Newtonsoft.Json;
 using SkiaSharp;
 
@@ -74,7 +72,7 @@ namespace IcarusDataMiner.Miners
 			{
 				if (table.Rows[i].TierIcon == "None") continue;
 
-				table.Rows[i].Image = DecodeTexture(table.Rows[i].TierIcon, table.Rows[i].TierIcon, providerManager.AssetProvider, logger);
+				table.Rows[i].Image = AssetUtil.LoadAndDecodeTexture(table.Rows[i].TierIcon, table.Rows[i].TierIcon, providerManager.AssetProvider, logger);
 			}
 
 			return table.Rows;
@@ -684,23 +682,6 @@ namespace IcarusDataMiner.Miners
 			InActions,
 			InAction,
 			Done
-		}
-
-		private static SKBitmap? DecodeTexture(string name, string assetPath, IFileProvider provider, Logger logger)
-		{
-			UTexture2D? texture = AssetUtil.LoadTexture(assetPath, provider);
-			if (texture == null)
-			{
-				logger.Log(LogLevel.Warning, $"Failed to load texture asset for '{name}'");
-				return null;
-			}
-
-			SKBitmap? bitmap = texture.Decode();
-			if (bitmap == null)
-			{
-				logger.Log(LogLevel.Warning, $"Failed to decode texture '{name}'");
-			}
-			return bitmap;
 		}
 
 		private static T? LoadJsonAsset<T>(string assetPath, IFileProvider provider)

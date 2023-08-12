@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+using CUE4Parse.UE4.Objects.Core.i18N;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using System.Collections;
@@ -476,6 +477,159 @@ namespace IcarusDataMiner
 		public override void WriteJson(JsonWriter writer, object? value, JsonSerializer serializer)
 		{
 			throw new NotSupportedException("This converter does not support writing");
+		}
+	}
+
+	[JsonConverter(typeof(ObjectPointerConverter))]
+	[TypeConverter(typeof(ObjectPointerTypeConverter))]
+	internal class ObjectPointer : IEquatable<ObjectPointer>, IComparable<ObjectPointer>
+	{
+		private readonly string? mRawText;
+
+		private readonly string? mTypeName;
+		private readonly string? mPath;
+
+		public string? TypeName => mTypeName;
+
+		public string? Path => mPath;
+
+		public static ObjectPointer Null { get; }
+
+		static ObjectPointer()
+		{
+			Null = new ObjectPointer(null);
+		}
+
+		public ObjectPointer(string? rawText)
+		{
+			mRawText = rawText;
+			if (mRawText == null) return;
+
+			string[] parts = mRawText.Split('\'');
+			switch (parts.Length)
+			{
+				case 1:
+					// Soft object pointer
+					mTypeName = null;
+					mPath = parts[0];
+					break;
+				case 3:
+					// Hard object pointer
+					mTypeName = parts[0];
+					mPath = parts[1];
+					break;
+					// Any other number of parts we don't know how to parse, so only raw text will be stored.
+					// The most likely case is that the raw text is an empty string, meaning this is a pointer
+					// to null. We want serialization to work regardless what is going on.
+			}
+		}
+
+		public override int GetHashCode()
+		{
+			return mRawText?.GetHashCode() ?? 0;
+		}
+
+		public bool Equals(ObjectPointer? other)
+		{
+			return other is not null && (mRawText?.Equals(other.mRawText) ?? other.mRawText is null);
+		}
+
+		public override bool Equals(object? obj)
+		{
+			return obj is ObjectPointer other && Equals(other);
+		}
+
+		public int CompareTo(ObjectPointer? other)
+		{
+			if (other is null) return 1;
+			if (mRawText is null) return other.mRawText is null ? 0 : -1;
+			return mRawText.CompareTo(other.mRawText);
+		}
+
+		public static implicit operator string?(ObjectPointer instance)
+		{
+			return instance.mRawText;
+		}
+
+		public override string? ToString()
+		{
+			return mRawText;
+		}
+
+		public string? GetAssetPath()
+		{
+			if (mPath == null) return null;
+
+			string assetPath = mPath;
+
+			if (assetPath.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase))
+			{
+				assetPath = $"Icarus/Content/{assetPath.Substring(6)}";
+			}
+
+			int dotIndex = assetPath.LastIndexOf('.');
+			if (dotIndex >= 0)
+			{
+				assetPath = assetPath.Substring(0, dotIndex);
+			}
+
+			return assetPath;
+		}
+
+		private class ObjectPointerConverter : JsonConverter
+		{
+			public override bool CanConvert(Type objectType)
+			{
+				return typeof(FText).IsAssignableFrom(objectType);
+			}
+
+			public override object? ReadJson(JsonReader reader, Type objectType, object? existingValue, JsonSerializer serializer)
+			{
+				if (!typeof(ObjectPointer).IsAssignableFrom(objectType)) return null;
+				if (reader.TokenType != JsonToken.String) return null;
+
+				return new ObjectPointer((string?)reader.Value);
+			}
+
+			public override void WriteJson(JsonWriter writer, object? value, JsonSerializer serializer)
+			{
+				ObjectPointer? ptr = value as ObjectPointer;
+				if (ptr == null) return;
+
+				writer.WriteValue(ptr.mRawText);
+			}
+		}
+
+		private class ObjectPointerTypeConverter : TypeConverter
+		{
+			public override bool CanConvertFrom(ITypeDescriptorContext? context, Type sourceType)
+			{
+				return sourceType == typeof(string);
+			}
+
+			public override bool CanConvertTo(ITypeDescriptorContext? context, Type? destinationType)
+			{
+				return false;
+			}
+
+			public override bool GetPropertiesSupported(ITypeDescriptorContext? context)
+			{
+				return false;
+			}
+
+			public override bool GetCreateInstanceSupported(ITypeDescriptorContext? context)
+			{
+				return false;
+			}
+
+			public override object? ConvertFrom(ITypeDescriptorContext? context, CultureInfo? culture, object value)
+			{
+				if (value is string strValue)
+				{
+					return new ObjectPointer(strValue);
+				}
+				return null;
+			}
 		}
 	}
 }

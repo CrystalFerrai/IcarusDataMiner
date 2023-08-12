@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+using CUE4Parse.UE4.Assets;
 using System.Diagnostics;
 using System.Reflection;
 
@@ -31,6 +32,11 @@ namespace IcarusDataMiner
 		private readonly ProviderManager mProviderManager;
 
 		private readonly List<IDataMiner> mMiners;
+
+		static MineRunner()
+		{
+			ObjectTypeRegistry.RegisterClass("GameplayTexture", typeof(UGameplayTexture));
+		}
 
 		public MineRunner(Config config, Logger logger)
 		{

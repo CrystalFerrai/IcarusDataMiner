@@ -12,9 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-using CUE4Parse.FileProvider;
-using CUE4Parse.UE4.Assets.Exports.Texture;
-using CUE4Parse_Conversion.Textures;
 using SkiaSharp;
 
 namespace IcarusDataMiner.Miners
@@ -76,7 +73,7 @@ namespace IcarusDataMiner.Miners
 				for (int y = 0; y < cols; ++y)
 				{
 					string rawPath = texturePaths[y + x * rows];
-					SKBitmap? bitmap = DecodeTexture(worldData.Name, rawPath, providerManager.AssetProvider, logger);
+					SKBitmap? bitmap = AssetUtil.LoadAndDecodeTexture(worldData.Name, rawPath, providerManager.AssetProvider, logger);
 					if (bitmap == null) continue;
 
 					tiles.Add(new Tile() { X = x, Y = y, Bitmap = bitmap });
@@ -143,33 +140,6 @@ namespace IcarusDataMiner.Miners
 			{
 				outData.SaveTo(outFile);
 			}
-		}
-
-		private static SKBitmap? DecodeTexture(string name, string assetPath, IFileProvider provider, Logger logger)
-		{
-			UTexture2D? texture = AssetUtil.LoadTexture(assetPath, provider);
-			if (texture == null)
-			{
-				logger.Log(LogLevel.Warning, $"Failed to load texture asset for '{name}'");
-				return null;
-			}
-
-			SKBitmap? bitmap = texture.Decode();
-			if (bitmap == null)
-			{
-				logger.Log(LogLevel.Warning, $"Failed to decode texture '{name}'");
-			}
-			else if (!texture.SRGB)
-			{
-				SKColor[] pixels = bitmap.Pixels;
-				for (int i = 0; i < pixels.Length; ++i)
-				{
-					pixels[i] = ColorUtil.LinearToSrgb(pixels[i]);
-				}
-				bitmap.Pixels = pixels;
-			}
-
-			return bitmap;
 		}
 
 		private struct Tile

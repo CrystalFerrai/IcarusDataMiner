@@ -121,7 +121,24 @@ namespace IcarusDataMiner.Miners
 					spawnZones.Add(new SpawnZoneData(zone.Name, zoneSetup.Color, zone.MinLevel, zone.MaxLevel, creatures, autonomousSpawnCreatures));
 				}
 
-				spawnConfigs.Add(new SpawnConfig(row.Name, spawnZones));
+				SKBitmap? spawnMap = null;
+				string? spawnMapName = null;
+				string? spawnMapPath = row.SpawnMap.GetAssetPath();
+				if (spawnMapPath is not null)
+				{
+					spawnMapName = Path.GetFileNameWithoutExtension(spawnMapPath);
+					if (spawnMapName is not null)
+					{
+						spawnMap = AssetUtil.LoadAndDecodeTexture(spawnMapName, spawnMapPath, providerManager.AssetProvider, logger);
+					}
+
+					if (spawnMap is null)
+					{
+						logger.Log(LogLevel.Warning, $"Encountered an error extracting the spawn map for config '{row.Name}'. This map will not be output.");
+					}
+				}
+
+				spawnConfigs.Add(new SpawnConfig(row.Name, spawnMapName, spawnMap, spawnZones));
 			}
 
 			// Output data
@@ -165,7 +182,24 @@ namespace IcarusDataMiner.Miners
 				}
 			}
 
-			// Output images
+			// Output spawn map textures
+			{
+				string outDir = Path.Combine(config.OutputDirectory, Name, "Visual");
+				foreach (SpawnConfig spawnConfig in spawnConfigs)
+				{
+					if (spawnConfig.SpawnMap is null) continue;
+
+					SKData outData = spawnConfig.SpawnMap.Encode(SKEncodedImageFormat.Png, 100);
+
+					string outPath = Path.Combine(outDir, $"{spawnConfig.SpawnMapName}.png");
+					using (FileStream outStream = IOUtil.CreateFile(outPath, logger))
+					{
+						outData.SaveTo(outStream);
+					}
+				}
+			}
+
+			// Output overlay images
 			{
 				SKColor textColorNegative = new((byte)(255 - TextColor.Red), (byte)(255 - TextColor.Green), (byte)(255 - TextColor.Blue), TextColor.Alpha);
 
@@ -375,9 +409,15 @@ namespace IcarusDataMiner.Miners
 
 			public IReadOnlyList<SpawnZoneData> SpawnZones { get; }
 
-			public SpawnConfig(string name, IEnumerable<SpawnZoneData> spawnZones)
+			public string? SpawnMapName { get; }
+
+			public SKBitmap? SpawnMap { get; }
+
+			public SpawnConfig(string name, string? spawnMapName, SKBitmap? spawnMap, IEnumerable<SpawnZoneData> spawnZones)
 			{
 				Name = name;
+				SpawnMapName = spawnMapName;
+				SpawnMap = spawnMap;
 				SpawnZones = new List<SpawnZoneData>(spawnZones);
 			}
 
@@ -448,14 +488,14 @@ namespace IcarusDataMiner.Miners
 			public JObject? Metadata { get; set; }
 
 			public string TerrainName;
-			public string Level;
-			public string TemperatureMap;
+			public ObjectPointer Level;
+			public ObjectPointer TemperatureMap;
 			public FVector2D TemperatureMapRange;
-			public string BiomeMap;
-			public string Bounds;
+			public ObjectPointer BiomeMap;
+			public ObjectPointer Bounds;
 			public FRowHandle SpawnConfig;
 			public FRowHandle FishConfig;
-			public string AudioZoneMap;
+			public ObjectPointer AudioZoneMap;
 		}
 
 		private struct FAISpawnConfigData : IDataTableRow
@@ -464,7 +504,7 @@ namespace IcarusDataMiner.Miners
 			public JObject? Metadata { get; set; }
 
 			public Dictionary<FRowEnum, FAISpawnRulesList> AISpawnRules;
-			public string SpawnMap;
+			public ObjectPointer SpawnMap;
 			public List<FAISpawnZoneSetup> SpawnZones;
 		}
 
@@ -523,7 +563,7 @@ namespace IcarusDataMiner.Miners
 			public JObject? Metadata { get; set; }
 
 			public FRowEnum AISetup;
-			public string AISpawnBehavior;
+			public ObjectPointer AISpawnBehavior;
 			public int MaxNumAroundPlayers;
 			public int MaxSpawnCount;
 			public int MaxDistanceToPlayers;
