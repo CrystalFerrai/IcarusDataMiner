@@ -13,6 +13,8 @@
 // limitations under the License.
 
 using SkiaSharp;
+using System.Diagnostics.CodeAnalysis;
+using System.Drawing;
 
 namespace IcarusDataMiner.Miners
 {
@@ -26,10 +28,15 @@ namespace IcarusDataMiner.Miners
 	[DefaultEnabled(false)]
 	internal class MapMiner : IDataMiner
 	{
+		private string? mOutDir;
+
 		public string Name => "Maps";
 
 		public bool Run(IProviderManager providerManager, Config config, Logger logger)
 		{
+			mOutDir = Path.Combine(config.OutputDirectory, Name);
+
+			// Export maps
 			foreach (WorldData worldData in providerManager.WorldDataUtil.Rows)
 			{
 				logger.Log(LogLevel.Information, $"Processing {worldData.Name}...");
@@ -39,6 +46,9 @@ namespace IcarusDataMiner.Miners
 
 				ExportMap(worldData.Name!, tiles, config, logger);
 			}
+
+			// Export map grid overlay images in common sizes
+			ExportMapGrids(config, logger);
 
 			return true;
 		}
@@ -83,7 +93,7 @@ namespace IcarusDataMiner.Miners
 			return tiles;
 		}
 
-		private static void ExportMap(string name, IReadOnlyList<Tile> tiles, Config config, Logger logger)
+		private void ExportMap(string name, IReadOnlyList<Tile> tiles, Config config, Logger logger)
 		{
 			if (tiles.Count == 0)
 			{
@@ -135,11 +145,120 @@ namespace IcarusDataMiner.Miners
 			}
 
 			logger.Log(LogLevel.Debug, "Saving output texture...");
-			string outPath = Path.Combine(config.OutputDirectory, $"{name}.png");
-			using (FileStream outFile = File.Create(outPath))
+			string outPath = Path.Combine(mOutDir!, $"{name}.png");
+			using (FileStream outFile = IOUtil.CreateFile(outPath, logger))
 			{
 				outData.SaveTo(outFile);
 			}
+		}
+
+		private void ExportMapGrids(Config config, Logger logger)
+		{
+			logger.Log(LogLevel.Information, "Gnerating map grid overlay images...");
+
+			IntPoint[] mapSizes = new[]
+			{
+				new IntPoint(2048, 2048),
+				new IntPoint(4096, 4096),
+				new IntPoint(8192, 8192)
+			};
+
+			IntPoint mapCellCount = new(16, 16);
+			foreach (IntPoint size in mapSizes)
+			{
+				SKData outData = CreateMapGrid(size, mapCellCount);
+
+				string outPath = Path.Combine(mOutDir!, $"MapGrid_{size.X}.png");
+				using (FileStream outStream = IOUtil.CreateFile(outPath, logger))
+				{
+					outData.SaveTo(outStream);
+				}
+			}
+
+			IntPoint[] outpostMapSizes = new[]
+			{
+				new IntPoint(1024, 1024),
+				new IntPoint(2048, 2048)
+			};
+
+			IntPoint outpostMapCellCount = new(4, 4);
+			foreach (IntPoint size in outpostMapSizes)
+			{
+				SKData outData = CreateMapGrid(size, outpostMapCellCount);
+
+				string outPath = Path.Combine(mOutDir!, $"MapGrid_Outpost_{size.X}.png");
+				using (FileStream outStream = IOUtil.CreateFile(outPath, logger))
+				{
+					outData.SaveTo(outStream);
+				}
+			}
+		}
+
+		private static SKData CreateMapGrid(IntPoint mapSize, IntPoint cellCount)
+		{
+			SKPoint mapScale = new(mapSize.X / (cellCount.X * 256.0f), mapSize.Y / (cellCount.Y * 256.0f));
+
+			SKImageInfo surfaceInfo = new()
+			{
+				Width = mapSize.X,
+				Height = mapSize.Y,
+				ColorSpace = SKColorSpace.CreateSrgb(),
+				ColorType = SKColorType.Rgba8888,
+				AlphaType = SKAlphaType.Premul
+			};
+
+			SKTypeface typeFace = SKTypeface.FromFamilyName("Segoe UI", SKFontStyleWeight.SemiBold, SKFontStyleWidth.Normal, SKFontStyleSlant.Upright);
+
+			using SKPaint linePaint = new()
+			{
+				Color = new SKColor(255, 255, 255, 128),
+				IsAntialias = false,
+				Style = SKPaintStyle.Stroke,
+				IsStroke = true,
+				BlendMode = SKBlendMode.Src
+			};
+
+			using SKPaint textPaint = new()
+			{
+				Color = SKColors.White,
+				IsAntialias = true,
+				Style = SKPaintStyle.Fill,
+				Typeface = typeFace,
+				TextSize = Math.Max(18.0f * mapScale.X, 10.0f),
+				TextAlign = SKTextAlign.Left
+			};
+
+			SKData outData;
+			using (SKSurface surface = SKSurface.Create(surfaceInfo))
+			{
+				SKCanvas canvas = surface.Canvas;
+
+				SKPoint gridCellSize = new(surfaceInfo.Width / (float)cellCount.X, surfaceInfo.Height / (float)cellCount.Y);
+
+				for (int y = 1; y < cellCount.Y; ++y)
+				{
+					canvas.DrawLine(0.0f, y * gridCellSize.Y, surfaceInfo.Width, y * gridCellSize.Y, linePaint);
+				}
+				for (int x = 1; x < cellCount.X; ++x)
+				{
+					canvas.DrawLine(x * gridCellSize.X, 0.0f, x * gridCellSize.X, surfaceInfo.Height, linePaint);
+				}
+
+				for (int y = 0; y < cellCount.Y; ++y)
+				{
+					for (int x = 0; x < cellCount.X; ++x)
+					{
+						string label = $"{(char)('A' + x)}{y + 1}";
+						canvas.DrawText(label, (float)Math.Floor(x * gridCellSize.X + 5.0f + 2.0f * (mapScale.X * 1.5f)) + 0.5f, y * gridCellSize.Y + 4.0f - textPaint.FontMetrics.Ascent, textPaint);
+					}
+				}
+
+				surface.Flush();
+				SKImage image = surface.Snapshot();
+				outData = image.Encode(SKEncodedImageFormat.Png, 100);
+			}
+
+			return outData;
 		}
 
 		private struct Tile
@@ -147,6 +266,40 @@ namespace IcarusDataMiner.Miners
 			public int X;
 			public int Y;
 			public SKBitmap Bitmap;
+		}
+
+		private readonly struct IntPoint : IEquatable<IntPoint>
+		{
+			public readonly int X;
+			public readonly int Y;
+
+			public static readonly IntPoint Zero;
+
+			static IntPoint()
+			{
+				Zero = new IntPoint(0, 0);
+			}
+
+			public IntPoint(int x, int y)
+			{
+				X = x;
+				Y = y;
+			}
+
+			public override readonly int GetHashCode()
+			{
+				return HashCode.Combine(X, Y);
+			}
+
+			public readonly bool Equals(IntPoint other)
+			{
+				return X.Equals(other.X) && Y.Equals(other.Y);
+			}
+
+			public override readonly bool Equals([NotNullWhen(true)] object? obj)
+			{
+				return obj is IntPoint other && Equals(other);
+			}
 		}
 	}
 }

@@ -256,7 +256,7 @@ namespace IcarusDataMiner.Miners
 					using (FileStream outStream = IOUtil.CreateFile(outPath, logger))
 					using (StreamWriter writer = new StreamWriter(outStream))
 					{
-						writer.WriteLine("Quad,ID,Template,Ore Pool,Ore Count,Exotics,Veins,Worms,Lakes,Mushrooms,Entrance X,Entrance Y,Entrance Z,Entrance R,Entrance Grid");
+						writer.WriteLine("Quad,ID,Template,Ore Foliage Type,Ore Count,Exotics,Veins,Worms,Lakes,Mushrooms,Entrance X,Entrance Y,Entrance Z,Entrance R,Entrance Grid");
 
 						foreach (CaveData cave in templateCaves)
 						{

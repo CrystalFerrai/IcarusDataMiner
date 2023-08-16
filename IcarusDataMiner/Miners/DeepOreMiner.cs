@@ -51,14 +51,17 @@ namespace IcarusDataMiner.Miners
 		{
 			Package mapPackage = (Package)providerManager.AssetProvider.LoadPackage(mapAsset);
 
-			int typeNameIndex = -1, rootComponentIndex = -1, relativeLocationIndex = -1;
+			int oreTypeNameIndex = -1, iceTypeNameIndex = -1, rootComponentIndex = -1, relativeLocationIndex = -1;
 			for (int i = 0; i < mapPackage.NameMap.Length; ++i)
 			{
 				FNameEntrySerialized name = mapPackage.NameMap[i];
 				switch (name.Name)
 				{
 					case "BP_DeepOreDepositSpawn_C":
-						typeNameIndex = i;
+						oreTypeNameIndex = i;
+						break;
+					case "BP_Deep_Mining_Ice_Deposit_C":
+						iceTypeNameIndex = i;
 						break;
 					case "RootComponent":
 						rootComponentIndex = i;
@@ -69,23 +72,27 @@ namespace IcarusDataMiner.Miners
 				}
 			}
 
-			int typeClassIndex = -1;
+			int oreTypeClassIndex = -1, iceTypeClassIndex = -1;
 			for (int i = 0; i < mapPackage.ImportMap.Length; ++i)
 			{
 				FObjectImport import = mapPackage.ImportMap[i];
-				if (import.ObjectName.Index == typeNameIndex)
+				if (import.ObjectName.Index == oreTypeNameIndex)
 				{
-					typeClassIndex = ~i;
-					break;
+					oreTypeClassIndex = ~i;
+				}
+				else if (import.ObjectName.Index == iceTypeNameIndex)
+				{
+					iceTypeClassIndex = ~i;
 				}
 			}
 
-			List<DepositInfo> deposits = new();
+			List<DepositInfo> oreDeposits = new();
+			List<DepositInfo> iceDeposits = new();
 
 			foreach (FObjectExport? export in mapPackage.ExportMap)
 			{
 				if (export == null) continue;
-				if (export.ClassIndex.Index != typeClassIndex) continue;
+				if (export.ClassIndex.Index != oreTypeClassIndex && export.ClassIndex.Index != iceTypeClassIndex) continue;
 
 				DepositInfo deposit = new();
 				deposit.SetName(export.ObjectName);
@@ -111,12 +118,20 @@ namespace IcarusDataMiner.Miners
 					}
 				}
 
-				deposits.Add(deposit);
+				if (export.ClassIndex.Index == oreTypeClassIndex)
+				{
+					oreDeposits.Add(deposit);
+				}
+				else
+				{
+					iceDeposits.Add(deposit);
+				}
 			}
 
-			if (deposits.Count > 0)
+			if (oreDeposits.Count > 0 || iceDeposits.Count > 0)
 			{
-				deposits.Sort();
+				oreDeposits.Sort();
+				iceDeposits.Sort();
 
 				// CSV
 				{
@@ -125,23 +140,48 @@ namespace IcarusDataMiner.Miners
 					using (StreamWriter writer = new StreamWriter(outStream))
 					{
 						writer.WriteLine("Name,LocationX,LocationY,LocationZ,Map");
-						foreach (var node in deposits)
+						void writeNodeInfo(DepositInfo node)
 						{
 							writer.WriteLine($"{node.Name},{node.Location.X},{node.Location.Y},{node.Location.Z},{worldData.GetGridCell(node.Location)}");
+						}
+						foreach (DepositInfo node in oreDeposits)
+						{
+							writeNodeInfo(node);
+						}
+						foreach (DepositInfo node in iceDeposits)
+						{
+							writeNodeInfo(node);
 						}
 					}
 				}
 
-				// Image
+				// Images
 				{
 					MapOverlayBuilder mapBuilder = MapOverlayBuilder.Create(worldData, providerManager.AssetProvider);
-					mapBuilder.AddLocations(deposits.Select(d => new MapLocation(d.Location, 5.0f)));
-					SKData outData = mapBuilder.DrawOverlay();
 
-					string outPath = Path.Combine(config.OutputDirectory, Name, $"{mapAsset.NameWithoutExtension}.png");
-					using (FileStream outStream = IOUtil.CreateFile(outPath, logger))
+					if (oreDeposits.Count > 0)
 					{
-						outData.SaveTo(outStream);
+						mapBuilder.AddLocations(oreDeposits.Select(d => new MapLocation(d.Location, 5.0f)));
+						SKData outData = mapBuilder.DrawOverlay();
+						mapBuilder.ClearLocations();
+
+						string outPath = Path.Combine(config.OutputDirectory, Name, $"{mapAsset.NameWithoutExtension}_Ore.png");
+						using (FileStream outStream = IOUtil.CreateFile(outPath, logger))
+						{
+							outData.SaveTo(outStream);
+						}
+					}
+
+					if (iceDeposits.Count > 0)
+					{
+						mapBuilder.AddLocations(iceDeposits.Select(d => new RotatedMapLocation(d.Location, 45.0f, 5.0f)), new SKColor(168, 160, 255, 255), MarkerShape.Square);
+						SKData outData = mapBuilder.DrawOverlay();
+
+						string outPath = Path.Combine(config.OutputDirectory, Name, $"{mapAsset.NameWithoutExtension}_Ice.png");
+						using (FileStream outStream = IOUtil.CreateFile(outPath, logger))
+						{
+							outData.SaveTo(outStream);
+						}
 					}
 				}
 			}
@@ -166,10 +206,10 @@ namespace IcarusDataMiner.Miners
 			{
 				int id = int.MaxValue;
 				string nameText = name.Text;
-				if (nameText.StartsWith("BP_DeepOreDepositSpawn"))
+
+				void parseId(string nameTextValue)
 				{
-					nameText = nameText["BP_DeepOreDepositSpawn".Length..];
-					string[] nameParts = nameText.Split('_');
+					string[] nameParts = nameTextValue.Split('_');
 					if (nameParts.Length > 0)
 					{
 						nameText = nameParts[0];
@@ -181,6 +221,16 @@ namespace IcarusDataMiner.Miners
 						}
 					}
 				}
+
+				if (nameText.StartsWith("BP_DeepOreDepositSpawn"))
+				{
+					parseId(nameText["BP_DeepOreDepositSpawn".Length..]);
+				}
+				if (nameText.StartsWith("BP_Deep_Mining_Ice_Deposit"))
+				{
+					parseId(nameText["BP_Deep_Mining_Ice_Deposit".Length..]);
+				}
+
 				mId = id;
 				Name = nameText;
 			}

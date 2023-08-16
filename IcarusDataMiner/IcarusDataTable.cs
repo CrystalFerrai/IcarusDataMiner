@@ -15,8 +15,10 @@
 using CUE4Parse.UE4.Objects.Core.i18N;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using Newtonsoft.Json.Serialization;
 using System.Collections;
 using System.ComponentModel;
+using System.ComponentModel.DataAnnotations;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Reflection;
@@ -431,10 +433,12 @@ namespace IcarusDataMiner
 								IDictionary outIndexMap = (IDictionary)Activator.CreateInstance(indexMapType, StringComparer.OrdinalIgnoreCase)!;
 								foreach (JObject row in rows)
 								{
+									object rowDefaultsCopy = Copy(rowDefaults)!;
+
 									IDataTableRow targetRow = (IDataTableRow)(Activator.CreateInstance(rowType) ?? throw new MissingMethodException($"Type {rowType} has no default constructor"));
 									foreach (FieldInfo fi in rowFields.Values)
 									{
-										fi.SetValue(targetRow, fi.GetValue(rowDefaults));
+										fi.SetValue(targetRow, fi.GetValue(rowDefaultsCopy));
 									}
 									string? rowName = null;
 									foreach (JProperty prop in row.Properties())
@@ -450,7 +454,16 @@ namespace IcarusDataMiner
 										}
 										else if (rowFields.TryGetValue(prop.Name, out FieldInfo? field))
 										{
-											field.SetValue(targetRow, prop.Value.ToObject(field.FieldType));
+											object? targetField = field.GetValue(targetRow);
+											if (targetField is null || prop.Value.Type != JTokenType.Object)
+											{
+												field.SetValue(targetRow, prop.Value.ToObject(field.FieldType));
+											}
+											else
+											{
+												JsonConvert.PopulateObject(prop.Value.ToString(), targetField);
+												field.SetValue(targetRow, targetField);
+											}
 										}
 									}
 
@@ -478,11 +491,71 @@ namespace IcarusDataMiner
 		{
 			throw new NotSupportedException("This converter does not support writing");
 		}
+
+		private static MethodInfo MemberwiseCloneMethod = typeof(object).GetMethod(nameof(MemberwiseClone), BindingFlags.NonPublic | BindingFlags.Instance)!;
+
+		private object? Copy(object? value)
+		{
+			if (value is null) return null;
+
+			if (value is ICloneable cloneable)
+			{
+				return cloneable.Clone();
+			}
+
+			Type valueType = value.GetType();
+			if (valueType.IsPrimitive)
+			{
+				return value;
+			}
+
+			{
+				ConstructorInfo? copyConstructor = valueType.GetConstructor(new Type[] { valueType });
+				if (copyConstructor is not null)
+				{
+					return Activator.CreateInstance(valueType, value);
+				}
+			}
+
+			if (value is IEnumerable)
+			{
+				Type enumerableType;
+				if (valueType.IsGenericType)
+				{
+					enumerableType = typeof(IEnumerable<>).MakeGenericType(valueType.GetGenericArguments());
+				}
+				else
+				{
+					enumerableType = typeof(IEnumerable);
+				}
+
+				ConstructorInfo? enumerableConstructor = valueType.GetConstructor(new Type[] { enumerableType });
+				if (enumerableConstructor is not null)
+				{
+					return Activator.CreateInstance(valueType, value);
+				}
+			}
+
+			if (valueType.IsValueType)
+			{
+				object newValue = MemberwiseCloneMethod.Invoke(value, null)!;
+
+				List<FieldInfo> valueFields = valueType.GetFields(BindingFlags.Instance | BindingFlags.Public).ToList();
+				foreach (FieldInfo field in valueFields)
+				{
+					field.SetValue(newValue, Copy(field.GetValue(value)));
+				}
+
+				return newValue;
+			}
+
+			throw new NotSupportedException($"Could not copy object of type {valueType.FullName}. The type may need to implement {nameof(ICloneable)} to be used within an {nameof(IcarusDataTable)} row.");
+		}
 	}
 
 	[JsonConverter(typeof(ObjectPointerConverter))]
 	[TypeConverter(typeof(ObjectPointerTypeConverter))]
-	internal class ObjectPointer : IEquatable<ObjectPointer>, IComparable<ObjectPointer>
+	internal class ObjectPointer : IEquatable<ObjectPointer>, IComparable<ObjectPointer>, ICloneable
 	{
 		private readonly string? mRawText;
 
@@ -498,6 +571,10 @@ namespace IcarusDataMiner
 		static ObjectPointer()
 		{
 			Null = new ObjectPointer(null);
+		}
+
+		public ObjectPointer()
+		{
 		}
 
 		public ObjectPointer(string? rawText)
@@ -574,6 +651,11 @@ namespace IcarusDataMiner
 			}
 
 			return assetPath;
+		}
+
+		public object Clone()
+		{
+			return new ObjectPointer(mRawText);
 		}
 
 		private class ObjectPointerConverter : JsonConverter

@@ -74,22 +74,24 @@ namespace IcarusDataMiner
 		}
 
 		/// <summary>
-		/// Add "White Dot" locations to the overlay
+		/// Add "White Shape" locations to the overlay
 		/// </summary>
 		/// <param name="locations">Locations to add</param>
-		public void AddLocations(IEnumerable<MapLocation> locations)
+		/// <param name="shape">The shape to use for location markers</param>
+		public void AddLocations(IEnumerable<MapLocation> locations, MarkerShape shape = MarkerShape.Circle)
 		{
-			mLocationCollections.Add(new LocationCollection(locations, SKColors.White, null));
+			mLocationCollections.Add(new LocationCollection(locations, SKColors.White, null, shape));
 		}
 
 		/// <summary>
-		/// Add "Colored Dot" locations to the overlay
+		/// Add "Colored Shape" locations to the overlay
 		/// </summary>
 		/// <param name="locations">Locations to add</param>
 		/// <param name="color">The color to use for the locations</param>
-		public void AddLocations(IEnumerable<MapLocation> locations, SKColor color)
+		/// <param name="shape">The shape to use for location markers</param>
+		public void AddLocations(IEnumerable<MapLocation> locations, SKColor color, MarkerShape shape = MarkerShape.Circle)
 		{
-			mLocationCollections.Add(new LocationCollection(locations, color, null));
+			mLocationCollections.Add(new LocationCollection(locations, color, null, shape));
 		}
 
 		/// <summary>
@@ -104,7 +106,7 @@ namespace IcarusDataMiner
 		/// </remarks>
 		public void AddLocations(IEnumerable<MapLocation> locations, SKImage icon)
 		{
-			mLocationCollections.Add(new LocationCollection(locations, SKColors.White, icon));
+			mLocationCollections.Add(new LocationCollection(locations, SKColors.White, icon, MarkerShape.None));
 		}
 
 		/// <summary>
@@ -168,7 +170,26 @@ namespace IcarusDataMiner
 
 						foreach (MapLocation location in collection.Locations)
 						{
-							canvas.DrawCircle((location.Position.X - mOriginOffsetX) * mWorldToMapX, (location.Position.Y - mOriginOffsetY) * mWorldToMapY, location.Size * sizeScale, paint);
+							SKMatrix transform = baseMatrix;
+							transform = transform.PreConcat(SKMatrix.CreateTranslation((location.Position.X - mOriginOffsetX) * mWorldToMapX, (location.Position.Y - mOriginOffsetY) * mWorldToMapY));
+
+							float locationRadius = location.Size * sizeScale;
+							if (location is RotatedMapLocation rotatedLocation)
+							{
+								transform = transform.PreConcat(SKMatrix.CreateRotationDegrees(rotatedLocation.RotationDegrees + 90.0f, locationRadius, locationRadius));
+							}
+
+							canvas.SetMatrix(transform);
+
+							switch (collection.Shape)
+							{
+								case MarkerShape.Circle:
+									canvas.DrawCircle(SKPoint.Empty, locationRadius, paint);
+									break;
+								case MarkerShape.Square:
+									canvas.DrawRect(-locationRadius, -locationRadius, locationRadius * 2.0f, locationRadius * 2.0f, paint);
+									break;
+							}
 						}
 					}
 					else
@@ -197,10 +218,10 @@ namespace IcarusDataMiner
 
 							canvas.DrawImage(collection.Icon, SKPoint.Empty);
 						}
-
-						canvas.SetMatrix(baseMatrix);
 					}
+					canvas.SetMatrix(baseMatrix);
 				}
+
 				canvas.SetMatrix(baseMatrix);
 
 				surface.Flush();
@@ -217,11 +238,14 @@ namespace IcarusDataMiner
 
 			public SKImage? Icon;
 
-			public LocationCollection(IEnumerable<MapLocation> locations, SKColor color, SKImage? icon)
+			public MarkerShape Shape;
+
+			public LocationCollection(IEnumerable<MapLocation> locations, SKColor color, SKImage? icon, MarkerShape shape)
 			{
 				Locations = new(locations);
 				Color = color;
 				Icon = icon;
+				Shape = shape;
 			}
 		}
 	}
@@ -237,10 +261,10 @@ namespace IcarusDataMiner
 		public FVector Position { get; }
 
 		/// <summary>
-		/// The pixel diameter of the rendered dot
+		/// The pixel diameter of the rendered shape
 		/// </summary>
 		/// <remarks>
-		/// The size only applies to "Dot" style locations. "Icon" locations will instead be sized based
+		/// The size only applies to "Shape" style locations. "Icon" locations will instead be sized based
 		/// on the size of the icon itself, ignoring this parameter.
 		/// 
 		/// Even though the size is represented in texture pixels, it will be scaled for cases where the
@@ -265,8 +289,7 @@ namespace IcarusDataMiner
 		/// The rotation of the location, in degrees.
 		/// </summary>
 		/// <remarks>
-		/// Rotation is pivoted around the center of the icon. This value is only used for "Icon" style
-		/// locations. "Dot" style locations represented by circles which would not change if rotated.
+		/// Rotation is pivoted around the center of the location marker.
 		/// </remarks>
 		public float RotationDegrees { get; }
 
@@ -275,5 +298,15 @@ namespace IcarusDataMiner
 		{
 			RotationDegrees = rotationDegrees;
 		}
+	}
+
+	/// <summary>
+	/// The shape of a location marker on a map overlay
+	/// </summary>
+	internal enum MarkerShape
+	{
+		None,
+		Circle,
+		Square
 	}
 }

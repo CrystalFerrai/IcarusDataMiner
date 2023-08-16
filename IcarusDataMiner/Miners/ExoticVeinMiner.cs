@@ -51,7 +51,7 @@ namespace IcarusDataMiner.Miners
 		{
 			Package mapPackage = (Package)providerManager.AssetProvider.LoadPackage(mapAsset);
 
-			int typeNameIndex = -1, spawnIdentifierIndex = -1, rootComponentIndex = -1, metaNodeIndex = -1, relativeLocationIndex = -1;
+			int typeNameIndex = -1, plantTypeNameIndex = -1, spawnIdentifierIndex = -1, rootComponentIndex = -1, metaNodeIndex = -1, relativeLocationIndex = -1;
 			for (int i = 0; i < mapPackage.NameMap.Length; ++i)
 			{
 				FNameEntrySerialized name = mapPackage.NameMap[i];
@@ -59,6 +59,9 @@ namespace IcarusDataMiner.Miners
 				{
 					case "BP_IcarusMetaSpawn_C":
 						typeNameIndex = i;
+						break;
+					case "BP_ExoticPlantSpawn_C":
+						plantTypeNameIndex = i;
 						break;
 					case "Spawn_Identifier":
 						spawnIdentifierIndex = i;
@@ -75,26 +78,33 @@ namespace IcarusDataMiner.Miners
 				}
 			}
 
-			int typeClassIndex = -1;
+			int typeClassIndex = -1, plantTypeClassIndex = -1;
 			for (int i = 0; i < mapPackage.ImportMap.Length; ++i)
 			{
 				FObjectImport import = mapPackage.ImportMap[i];
 				if (import.ObjectName.Index == typeNameIndex)
 				{
 					typeClassIndex = ~i;
-					break;
+				}
+				else if (import.ObjectName.Index == plantTypeNameIndex)
+				{
+					plantTypeClassIndex = ~i;
 				}
 			}
 
 			List<ExoticNodeInfo> exoticNodes = new();
-			List<ExoticNodeInfo> redExoticNodes = new();
 
 			foreach (FObjectExport? export in mapPackage.ExportMap)
 			{
 				if (export == null) continue;
-				if (export.ClassIndex.Index != typeClassIndex) continue;
+				if (export.ClassIndex.Index != typeClassIndex && export.ClassIndex.Index != plantTypeClassIndex) continue;
 
 				ExoticNodeInfo node = new();
+
+				if (export.ClassIndex.Index == plantTypeClassIndex)
+				{
+					node.NodeType = ExoticNodeType.Plant;
+				}
 
 				UObject veinObject = export.ExportObject.Value;
 				for (int i = 0; i < veinObject.Properties.Count; ++i)
@@ -133,31 +143,23 @@ namespace IcarusDataMiner.Miners
 							case "MetaDeposit_Arctic":
 							case "MetaDeposit_Conifer":
 							case "MetaDeposit_Desert":
-								node.IsRed = false;
+								node.NodeType = ExoticNodeType.Deposit;
 								break;
 							case "MetaDeposit_Volcanic":
-								node.IsRed = true;
+								node.NodeType = ExoticNodeType.RedDeposit;
 								break;
 						}
 					}
 				}
 
-				if (node.SpawnIdentifier.Equals("None")) continue;
+				if (node.NodeType != ExoticNodeType.Plant && node.SpawnIdentifier.Equals("None")) continue;
 
-				if (node.IsRed)
-				{
-					redExoticNodes.Add(node);
-				}
-				else
-				{
-					exoticNodes.Add(node);
-				}
+				exoticNodes.Add(node);
 			}
 
-			if (exoticNodes.Count > 0 || redExoticNodes.Count > 0)
+			if (exoticNodes.Count > 0)
 			{
 				exoticNodes.Sort();
-				redExoticNodes.Sort();
 
 				// CSV
 				{
@@ -165,15 +167,10 @@ namespace IcarusDataMiner.Miners
 					using (FileStream outStream = IOUtil.CreateFile(outputPath, logger))
 					using (StreamWriter writer = new(outStream))
 					{
-						writer.WriteLine("Node ID,LocationX,LocationY,Map");
+						writer.WriteLine("Node ID,Type,LocationX,LocationY,Map");
 						foreach (var node in exoticNodes)
 						{
-							writer.WriteLine($"{node.SpawnIdentifier},{node.Location.X},{node.Location.Y},{worldData.GetGridCell(node.Location)}");
-						}
-						writer.WriteLine(",,,");
-						foreach (var node in redExoticNodes)
-						{
-							writer.WriteLine($"{node.SpawnIdentifier},{node.Location.X},{node.Location.Y},{worldData.GetGridCell(node.Location)}");
+							writer.WriteLine($"{node.SpawnIdentifier},{node.NodeType},{node.Location.X},{node.Location.Y},{worldData.GetGridCell(node.Location)}");
 						}
 					}
 				}
@@ -181,8 +178,9 @@ namespace IcarusDataMiner.Miners
 				// Image
 				{
 					MapOverlayBuilder mapBuilder = MapOverlayBuilder.Create(worldData, providerManager.AssetProvider);
-					mapBuilder.AddLocations(exoticNodes.Select(n => new MapLocation(n.Location)), Resources.Icon_Exotic);
-					mapBuilder.AddLocations(redExoticNodes.Select(n => new MapLocation(n.Location)), Resources.Icon_RedExotic);
+					mapBuilder.AddLocations(exoticNodes.Where(n => n.NodeType == ExoticNodeType.Deposit).Select(n => new MapLocation(n.Location)), Resources.Icon_Exotic);
+					mapBuilder.AddLocations(exoticNodes.Where(n => n.NodeType == ExoticNodeType.RedDeposit).Select(n => new MapLocation(n.Location)), Resources.Icon_RedExotic);
+					mapBuilder.AddLocations(exoticNodes.Where(n => n.NodeType == ExoticNodeType.Plant).Select(n => new MapLocation(n.Location)), Resources.Icon_ExoticSeed);
 					SKData outData = mapBuilder.DrawOverlay();
 
 					string outPath = Path.Combine(config.OutputDirectory, Name, $"{mapAsset.NameWithoutExtension}.png");
@@ -202,7 +200,7 @@ namespace IcarusDataMiner.Miners
 
 			public FVector Location { get; set; }
 
-			public bool IsRed { get; set; }
+			public ExoticNodeType NodeType { get; set; }
 
 			public int CompareTo(ExoticNodeInfo? other)
 			{
@@ -225,6 +223,14 @@ namespace IcarusDataMiner.Miners
 			{
 				return SpawnIdentifier;
 			}
+		}
+
+		private enum ExoticNodeType
+		{
+			Unknown,
+			Deposit,
+			RedDeposit,
+			Plant
 		}
 	}
 }

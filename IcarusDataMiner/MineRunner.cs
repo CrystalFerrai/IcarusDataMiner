@@ -119,7 +119,7 @@ namespace IcarusDataMiner
 		private void CreateMiners(IEnumerable<string>? minersToInclude)
 		{
 			HashSet<string>? includeMiners = minersToInclude == null ? null : new HashSet<string>(minersToInclude.Select(m => m.ToLowerInvariant()));
-			bool forceInclude = includeMiners?.Contains("all") ?? false;
+			bool forceInclude = includeMiners?.Contains("all", StringComparer.OrdinalIgnoreCase) ?? false;
 
 			Type minerInterface = typeof(IDataMiner);
 
@@ -161,6 +161,8 @@ namespace IcarusDataMiner
 				}
 			}
 
+			includeMiners?.RemoveWhere(n => n.Equals("all", StringComparison.OrdinalIgnoreCase));
+
 			if (includeMiners?.Count > 0)
 			{
 				mLogger.Log(LogLevel.Warning, $"The following miners specified in the filter could not be located: {string.Join(',', includeMiners)}");
@@ -168,6 +170,10 @@ namespace IcarusDataMiner
 			if (mMiners.Count == 0)
 			{
 				mLogger.Log(LogLevel.Error, "No data miners were found which match the passed in filter");
+			}
+			else
+			{
+				mLogger.Log(LogLevel.Information, $"The following miners will be run: {string.Join(',', mMiners.Select(m => m.Name))}");
 			}
 		}
 	}

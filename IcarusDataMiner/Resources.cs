@@ -25,12 +25,14 @@ namespace IcarusDataMiner
 		public static SKImage Icon_Cave { get; }
 		public static SKImage Icon_Exotic { get; }
 		public static SKImage Icon_RedExotic { get; }
+		public static SKImage Icon_ExoticSeed { get; }
 
 		static Resources()
 		{
 			Icon_Cave = LoadImage("IcarusDataMiner.Resources.icon_cave.png");
 			Icon_Exotic = LoadImage("IcarusDataMiner.Resources.icon_exotic.png");
 			Icon_RedExotic = LoadImage("IcarusDataMiner.Resources.icon_redexotic.png");
+			Icon_ExoticSeed = LoadImage("IcarusDataMiner.Resources.icon_exoticseed.png");
 		}
 
 		private static SKImage LoadImage(string resourcePath)

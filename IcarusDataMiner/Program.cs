@@ -50,7 +50,7 @@ namespace IcarusDataMiner
 			if (!LoadConfig(args, ref argIndex)) return 1;
 
 			bool success;
-			using (MineRunner runner = new MineRunner(sConfig, sLogger))
+			using (MineRunner runner = new(sConfig, sLogger))
 			{
 				if (!runner.Initialize(getMiners(args, ref argIndex))) return 1;
 				success = runner.Run();

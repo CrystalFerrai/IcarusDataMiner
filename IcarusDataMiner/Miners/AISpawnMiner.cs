@@ -28,8 +28,8 @@ namespace IcarusDataMiner.Miners
 		public string Name => "Spawns";
 
 		private static readonly SKColor BackgroundColor = new(0xff101010);
-		private static readonly SKColor LineColor = new(0x80f0f0f0);
-		private static readonly SKColor TextColor = new(0xfff0f0f0);
+		private static readonly SKColor BannerBaseColor = new(0xff303030);
+		private static readonly SKColor ForegroundColor = new(0xfff0f0f0);
 
 		private static readonly SKTypeface TitleTypeFace = SKTypeface.FromFamilyName("Segoe UI", SKFontStyleWeight.Bold, SKFontStyleWidth.Normal, SKFontStyleSlant.Upright);
 		private const float TitleTextSize = 18.0f;
@@ -87,10 +87,18 @@ namespace IcarusDataMiner.Miners
 				}
 			}
 
+			Dictionary<string, HashSet<int>> densityMap = new();
 			List<SpawnConfig> spawnConfigs = new();
+
 			foreach (FAISpawnConfigData row in spawnConfigTable.Values.Where(r => spawnConfigSet.Contains(r.Name)))
 			{
-				List<SpawnZoneData> spawnZones = new();
+				HashSet<int> densities = new();
+				densityMap.Add(row.Name, densities);
+
+				List<SpawnZone> spawnZones = new();
+				Dictionary<int, CompositeSpawnZone> compositeZoneMap = new();
+
+				char nextCompositeId = 'A';
 
 				foreach (FAISpawnZoneSetup zoneSetup in row.SpawnZones)
 				{
@@ -118,7 +126,28 @@ namespace IcarusDataMiner.Miners
 					}
 					autonomousSpawnCreatures.Sort();
 
-					spawnZones.Add(new SpawnZoneData(zone.Name, zoneSetup.Color, zone.MinLevel, zone.MaxLevel, creatures, autonomousSpawnCreatures));
+					densities.Add(zone.Creatures.BiomeSpawnDensity);
+
+					SpawnZone newSpawnZone = new(zone.Name, zoneSetup.Color, zone.MinLevel, zone.MaxLevel, zone.Creatures.BiomeSpawnDensity, creatures, autonomousSpawnCreatures);
+					spawnZones.Add(newSpawnZone);
+
+					int creatureHash = newSpawnZone.GetCreatureHash();
+					CompositeSpawnZone? compositeZone;
+					if (compositeZoneMap.TryGetValue(creatureHash, out compositeZone))
+					{
+						compositeZone.UpdateName(newSpawnZone.Name);
+					}
+					else
+					{
+						if (nextCompositeId > 'Z') throw new NotImplementedException("Too many composites for single letter names. Need to expand this.");
+						compositeZone = new(nextCompositeId.ToString(), creatureHash, newSpawnZone);
+						compositeZoneMap.Add(creatureHash, compositeZone);
+						++nextCompositeId;
+					}
+
+					newSpawnZone.CompositeId = compositeZone.Id;
+
+					if (newSpawnZone.SpawnDensity != compositeZone.SpawnDensity) throw new NotImplementedException("Found two spawn zones with the same creatures but different spawn density. We need to implement separating spawn composites by desnsity if this ever comes up.");
 				}
 
 				SKBitmap? spawnMap = null;
@@ -138,7 +167,9 @@ namespace IcarusDataMiner.Miners
 					}
 				}
 
-				spawnConfigs.Add(new SpawnConfig(row.Name, spawnMapName, spawnMap, spawnZones));
+				List<CompositeSpawnZone> compositeZones = new(compositeZoneMap.Values);
+				compositeZones.Sort();
+				spawnConfigs.Add(new SpawnConfig(row.Name, spawnMapName, spawnMap, spawnZones, compositeZones));
 			}
 
 			// Output data
@@ -151,10 +182,10 @@ namespace IcarusDataMiner.Miners
 					using (FileStream outStream = IOUtil.CreateFile(outputPath, logger))
 					using (StreamWriter writer = new StreamWriter(outStream))
 					{
-						writer.WriteLine("Zone,Color,MinLevel,MaxLevel,Creatures,AutoCreatures");
-						foreach (SpawnZoneData spawnZone in spawnConfig.SpawnZones)
+						writer.WriteLine("Zone,Color,MinLevel,MaxLevel,Density,Creatures,AutoCreatures");
+						foreach (SpawnZone spawnZone in spawnConfig.SpawnZones)
 						{
-							writer.Write($"{spawnZone.Name},\"=\"\"{spawnZone.Color.R},{spawnZone.Color.G},{spawnZone.Color.B}\"\"\",{spawnZone.MinLevel},{spawnZone.MaxLevel},");
+							writer.Write($"{spawnZone.Name},\"=\"\"{spawnZone.Color.R},{spawnZone.Color.G},{spawnZone.Color.B}\"\"\",{spawnZone.MinLevel},{spawnZone.MaxLevel},{spawnZone.SpawnDensity},");
 
 							writer.Write("\"=\"\"");
 							float weightSum = spawnZone.Creatures.Sum(c => c.Weight);
@@ -196,16 +227,36 @@ namespace IcarusDataMiner.Miners
 					{
 						outData.SaveTo(outStream);
 					}
+
+					// Another copy with all pixels set to full alpha for easier image composition
+					SKColor[] pixels = spawnConfig.SpawnMap.Pixels.ToArray();
+					for (int i = 0; i < pixels.Length; ++i)
+					{
+						pixels[i] = new SKColor((uint)pixels[i] | 0xff000000u);
+					}
+
+					SKBitmap opaque = new(spawnConfig.SpawnMap.Info)
+					{
+						Pixels = pixels
+					};
+					outData = opaque.Encode(SKEncodedImageFormat.Png, 100);
+
+					outPath = Path.Combine(outDir, $"{spawnConfig.SpawnMapName}_Opaque.png");
+					using (FileStream outStream = IOUtil.CreateFile(outPath, logger))
+					{
+						outData.SaveTo(outStream);
+					}
+
 				}
 			}
 
 			// Output overlay images
 			{
-				SKColor textColorNegative = new((byte)(255 - TextColor.Red), (byte)(255 - TextColor.Green), (byte)(255 - TextColor.Blue), TextColor.Alpha);
+				SKColor foregroundColorNegative = new((byte)(255 - ForegroundColor.Red), (byte)(255 - ForegroundColor.Green), (byte)(255 - ForegroundColor.Blue), ForegroundColor.Alpha);
 
 				using SKPaint titlePaint = new()
 				{
-					Color = TextColor,
+					Color = ForegroundColor,
 					IsAntialias = true,
 					Style = SKPaintStyle.Fill,
 					Typeface = TitleTypeFace,
@@ -213,19 +264,12 @@ namespace IcarusDataMiner.Miners
 					TextAlign = SKTextAlign.Left
 				};
 
-				using SKPaint titlePaintNegative = new()
-				{
-					Color = textColorNegative,
-					IsAntialias = true,
-					Style = SKPaintStyle.Fill,
-					Typeface = TitleTypeFace,
-					TextSize = TitleTextSize,
-					TextAlign = SKTextAlign.Left
-				};
+				using SKPaint titlePaintNegative = titlePaint.Clone();
+				titlePaintNegative.Color = foregroundColorNegative;
 
 				using SKPaint bodyPaint = new()
 				{
-					Color = TextColor,
+					Color = ForegroundColor,
 					IsAntialias = true,
 					Style = SKPaintStyle.Fill,
 					Typeface = BodyTypeFace,
@@ -235,7 +279,7 @@ namespace IcarusDataMiner.Miners
 
 				using SKPaint bodyBoldPaint = new()
 				{
-					Color = TextColor,
+					Color = ForegroundColor,
 					IsAntialias = true,
 					Style = SKPaintStyle.Fill,
 					Typeface = BodyBoldTypeFace,
@@ -243,25 +287,39 @@ namespace IcarusDataMiner.Miners
 					TextAlign = SKTextAlign.Left
 				};
 
-				using SKPaint bodyBoldPaintNegative = new()
+				using SKPaint bodyBoldPaintNegative = bodyBoldPaint.Clone();
+				bodyBoldPaintNegative.Color = foregroundColorNegative;
+
+				using SKPaint bodyBoldCenterPaint = bodyBoldPaint.Clone();
+				bodyBoldCenterPaint.TextAlign = SKTextAlign.Center;
+
+				using SKPaint bodyBoldCenterPaintNegative = bodyBoldPaintNegative.Clone();
+				bodyBoldCenterPaintNegative.TextAlign = SKTextAlign.Center;
+
+				using SKPaint nameCirclePaint = new()
 				{
-					Color = textColorNegative,
+					Color = ForegroundColor,
+					IsStroke = true,
 					IsAntialias = true,
-					Style = SKPaintStyle.Fill,
-					Typeface = BodyBoldTypeFace,
-					TextSize = BodyTextSize,
-					TextAlign = SKTextAlign.Left
+					Style = SKPaintStyle.Stroke,
+					StrokeWidth = 1.5f
 				};
 
-				using SKPaint linePaint = new SKPaint()
+				using SKPaint nameCirclePaintNegative = nameCirclePaint.Clone();
+				nameCirclePaintNegative.Color = foregroundColorNegative;
+
+				using SKPaint linePaint = new()
 				{
-					Color = LineColor,
+					Color = ForegroundColor,
 					IsStroke = true,
 					IsAntialias = false,
 					Style = SKPaintStyle.Stroke
 				};
 
-				using SKPaint fillPaint = new SKPaint()
+				using SKPaint linePaintNegative = linePaint.Clone();
+				linePaintNegative.Color = foregroundColorNegative;
+
+				using SKPaint fillPaint = new()
 				{
 					IsStroke = false,
 					IsAntialias = false,
@@ -271,12 +329,16 @@ namespace IcarusDataMiner.Miners
 				string outDir = Path.Combine(config.OutputDirectory, Name, "Visual");
 				foreach (SpawnConfig spawnConfig in spawnConfigs)
 				{
-					HashSet<string> seenZoneFileNames = new();
+					bool showDensities = densityMap[spawnConfig.Name].Count > 1;
 
-					foreach (SpawnZoneData spawnZone in spawnConfig.SpawnZones)
+					// Helper to create an image for a spawn zone or spawn composite
+					SKData CreateSpawnZoneInfoBox(ISpawnZoneData spawnZone)
 					{
+						bool showLevelInfo = spawnZone.MinLevel >= 0;
+
 						string titleText = spawnZone.Name[(spawnZone.Name.IndexOf("_") + 1)..];
 						string levelText = $"Level: {spawnZone.MinLevel} - {spawnZone.MaxLevel}";
+						string densityText = $"Density: {spawnZone.SpawnDensity}";
 						List<string> body1Text = new();
 						List<string> body2Text = new();
 
@@ -290,13 +352,25 @@ namespace IcarusDataMiner.Miners
 							body2Text.Add($"{spawnZone.AutonomousSpawnCreatures[i]}");
 						}
 
-						float textWidth = titlePaint.MeasureText(titleText);
+						float circleRadius = bodyBoldPaint.FontSpacing * 0.5f;
+
+						float titleWidth = titlePaint.MeasureText(titleText);
+						if (spawnZone.Id is not null)
+						{
+							titleWidth += circleRadius * 2.0f + 4.0f;
+						}
+
+						float textWidth = titleWidth;
+						if (showLevelInfo) textWidth = Math.Max(textWidth, bodyBoldPaint.MeasureText(levelText));
+						if (showDensities) textWidth = Math.Max(textWidth, bodyBoldPaint.MeasureText(densityText));
 						foreach (string text in body1Text.Concat(body2Text))
 						{
 							textWidth = Math.Max(textWidth, bodyPaint.MeasureText(text));
 						}
 
-						float textHeight = titlePaint.FontSpacing + bodyBoldPaint.FontSpacing + (body1Text.Count + body2Text.Count) * bodyPaint.FontSpacing;
+						float textHeight = titlePaint.FontSpacing + (body1Text.Count + body2Text.Count) * bodyPaint.FontSpacing;
+						if (showLevelInfo) textHeight += bodyBoldPaint.FontSpacing;
+						if (showDensities) textHeight += bodyBoldPaint.FontSpacing;
 
 						bool hasBothBodyTexts = body1Text.Count > 0 && body2Text.Count > 0;
 
@@ -309,17 +383,21 @@ namespace IcarusDataMiner.Miners
 							AlphaType = SKAlphaType.Premul
 						};
 
-						SKData outData;
-
 						using (SKSurface surface = SKSurface.Create(surfaceInfo))
 						{
 							SKCanvas canvas = surface.Canvas;
 
 							canvas.Clear(BackgroundColor);
 
-							float posY = 20.0f + titlePaint.FontSpacing + bodyPaint.FontSpacing;
+							float posY = 20.0f + titlePaint.FontSpacing;
+							if (showLevelInfo) posY += bodyBoldPaint.FontSpacing;
+							if (showDensities) posY += bodyBoldPaint.FontSpacing;
 
-							SKColor bannerBGColor = ColorUtil.ToSKColor(spawnZone.Color, 255);
+							SKColor bannerBGColor = BannerBaseColor;
+							if (spawnZone.Id is null)
+							{
+								bannerBGColor = ColorUtil.ToSKColor(spawnZone.Color, 255);
+							}
 							bool useNegative = !IsColorCloser(titlePaint.Color, bannerBGColor, titlePaintNegative.Color);
 
 							// Banner
@@ -332,15 +410,38 @@ namespace IcarusDataMiner.Miners
 							// Title
 							float textPosX = 10.0f;
 							float textPosY = 10.0f - titlePaint.FontMetrics.Ascent;
-							
-							canvas.DrawText(titleText, textPosX, textPosY, useNegative ? titlePaintNegative : titlePaint);
+
+							if (spawnZone.Id is not null)
+							{
+								float textYOffset = Math.Abs((titlePaint.FontMetrics.Ascent - bodyBoldCenterPaint.FontMetrics.Ascent) * 0.5f);
+								SKPoint circleCenter = new(textPosX + circleRadius, textPosY + (bodyBoldCenterPaint.FontMetrics.Ascent * 0.33f - textYOffset));
+								canvas.DrawCircle(circleCenter, circleRadius, useNegative ? nameCirclePaintNegative : nameCirclePaint);
+								canvas.DrawText(spawnZone.Id, textPosX + circleRadius, textPosY - textYOffset, useNegative ? bodyBoldCenterPaintNegative : bodyBoldCenterPaint);
+
+								canvas.DrawText(titleText, textPosX + circleRadius * 2.0f + 4.0f, textPosY, useNegative ? titlePaintNegative : titlePaint);
+							}
+							else
+							{
+								canvas.DrawText(titleText, textPosX, textPosY, useNegative ? titlePaintNegative : titlePaint);
+							}
 							textPosY += titlePaint.FontSpacing;
 
 							// Level
-							canvas.DrawText(levelText, textPosX, textPosY, useNegative ? bodyBoldPaintNegative : bodyBoldPaint);
-							textPosY += bodyPaint.FontSpacing + 10.0f;
+							if (showLevelInfo)
+							{
+								canvas.DrawText(levelText, textPosX, textPosY, useNegative ? bodyBoldPaintNegative : bodyBoldPaint);
+								textPosY += bodyPaint.FontSpacing;
+							}
+
+							// Density
+							if (showDensities)
+							{
+								canvas.DrawText(densityText, textPosX, textPosY, useNegative ? bodyBoldPaintNegative : bodyBoldPaint);
+								textPosY += bodyPaint.FontSpacing;
+							}
 
 							// Divider
+							textPosY += 10.0f;
 							canvas.DrawLine(1.0f, posY, surfaceInfo.Width - 1.0f, posY, linePaint);
 							posY += 5.0f;
 
@@ -372,19 +473,111 @@ namespace IcarusDataMiner.Miners
 
 							surface.Flush();
 							SKImage image = surface.Snapshot();
-							outData = image.Encode(SKEncodedImageFormat.Png, 100);
+							return image.Encode(SKEncodedImageFormat.Png, 100);
+						}
+					}
+
+					// Full spawn zone and composite info images
+					{
+						HashSet<string> seenZoneFileNames = new();
+
+						foreach (SpawnZone spawnZone in spawnConfig.SpawnZones)
+						{
+							string zoneFileName = spawnZone.Name;
+							for (int i = 1; !seenZoneFileNames.Add(zoneFileName); ++i)
+							{
+								zoneFileName = $"{spawnZone.Name}_{i}";
+							}
+
+							SKData outData = CreateSpawnZoneInfoBox(spawnZone);
+
+							string outPath = Path.Combine(outDir, spawnConfig.Name, "Zones", $"{zoneFileName}.png");
+							using (FileStream outStream = IOUtil.CreateFile(outPath, logger))
+							{
+								outData.SaveTo(outStream);
+							}
 						}
 
-						string zoneFileName = spawnZone.Name;
-						for (int i = 1; !seenZoneFileNames.Add(zoneFileName); ++i)
+						foreach (CompositeSpawnZone spawnZone in spawnConfig.CompositeZones)
 						{
-							zoneFileName = $"{spawnZone.Name}_{i}";
-						}
+							SKData outData = CreateSpawnZoneInfoBox(spawnZone);
 
-						string outPath = Path.Combine(outDir, spawnConfig.Name, $"{zoneFileName}.png");
-						using (FileStream outStream = IOUtil.CreateFile(outPath, logger))
+							string outPath = Path.Combine(outDir, spawnConfig.Name, "Composites", $"{spawnZone.Id}.png");
+							using (FileStream outStream = IOUtil.CreateFile(outPath, logger))
+							{
+								outData.SaveTo(outStream);
+							}
+						}
+					}
+
+					// Composite reference info images
+					{
+						HashSet<string> seenZoneFileNames = new();
+
+						foreach (SpawnZone spawnZone in spawnConfig.SpawnZones)
 						{
-							outData.SaveTo(outStream);
+							string levelText = $"{spawnZone.MinLevel}-{spawnZone.MaxLevel}";
+
+							float levelTextWidth = bodyBoldPaint.MeasureText(levelText);
+
+							float textHeight = bodyBoldPaint.FontSpacing;
+
+							float circleRadius = bodyBoldPaint.FontSpacing * 0.5f;
+
+							SKImageInfo surfaceInfo = new()
+							{
+								Width = (int)Math.Ceiling(levelTextWidth + circleRadius * 2.0f) + 14,
+								Height = (int)Math.Ceiling(textHeight) + 9,
+								ColorSpace = SKColorSpace.CreateSrgb(),
+								ColorType = SKColorType.Rgba8888,
+								AlphaType = SKAlphaType.Premul
+							};
+
+							SKData outData;
+							using (SKSurface surface = SKSurface.Create(surfaceInfo))
+							{
+								SKCanvas canvas = surface.Canvas;
+
+								canvas.Clear(BackgroundColor);
+
+								SKColor bannerBGColor = ColorUtil.ToSKColor(spawnZone.Color, 255);
+								bool useNegative = !IsColorCloser(titlePaint.Color, bannerBGColor, titlePaintNegative.Color);
+
+								float textPosX = 5.0f + circleRadius;
+								float textPosY = 4.0f - bodyBoldPaint.FontMetrics.Ascent;
+
+								// Banner
+								fillPaint.Color = bannerBGColor;
+								canvas.DrawRect(0.0f, 0.0f, surfaceInfo.Width, surfaceInfo.Height, fillPaint);
+
+								// Outline
+								canvas.DrawRect(0.0f, 0.0f, surfaceInfo.Width - 1.0f, surfaceInfo.Height - 1.0f, useNegative ? linePaintNegative : linePaint);
+
+								// Name
+								SKPoint circleCenter = new(textPosX, textPosY + bodyBoldCenterPaint.FontMetrics.Ascent * 0.33f);
+								canvas.DrawCircle(circleCenter, circleRadius, useNegative ? nameCirclePaintNegative : nameCirclePaint);
+								canvas.DrawText(spawnZone.CompositeId, textPosX, textPosY, useNegative ? bodyBoldCenterPaintNegative : bodyBoldCenterPaint);
+								textPosX += circleRadius + 4.0f;
+
+								// Level
+								canvas.DrawText(levelText, textPosX, textPosY, useNegative ? bodyBoldPaintNegative : bodyBoldPaint);
+
+								surface.Flush();
+								SKImage image = surface.Snapshot();
+								outData = image.Encode(SKEncodedImageFormat.Png, 100);
+							}
+
+							string zoneFileName = $"{spawnZone.Color.A}_{spawnZone.Name}";
+							for (int i = 1; !seenZoneFileNames.Add(zoneFileName); ++i)
+							{
+								zoneFileName = $"{spawnZone.Name}_{i}";
+							}
+
+							string outPath = Path.Combine(outDir, spawnConfig.Name, "CompositeRefs", $"{zoneFileName}.png");
+							using (FileStream outStream = IOUtil.CreateFile(outPath, logger))
+							{
+								outData.SaveTo(outStream);
+							}
 						}
 					}
 				}
@@ -392,7 +585,7 @@ namespace IcarusDataMiner.Miners
 		}
 
 		// Is test closer to target than source is to target based on perceived luminance?
-		private bool IsColorCloser(SKColor source, SKColor target, SKColor test)
+		private static bool IsColorCloser(SKColor source, SKColor target, SKColor test)
 		{
 			const float rl = 0.2126f, gl = 0.7152f, bl = 0.0722f;
 
@@ -407,18 +600,21 @@ namespace IcarusDataMiner.Miners
 		{
 			public string Name { get; }
 
-			public IReadOnlyList<SpawnZoneData> SpawnZones { get; }
+			public IReadOnlyList<SpawnZone> SpawnZones { get; }
+
+			public IReadOnlyList<CompositeSpawnZone> CompositeZones { get; }
 
 			public string? SpawnMapName { get; }
 
 			public SKBitmap? SpawnMap { get; }
 
-			public SpawnConfig(string name, string? spawnMapName, SKBitmap? spawnMap, IEnumerable<SpawnZoneData> spawnZones)
+			public SpawnConfig(string name, string? spawnMapName, SKBitmap? spawnMap, IEnumerable<SpawnZone> spawnZones, IReadOnlyList<CompositeSpawnZone> compositeZones)
 			{
 				Name = name;
 				SpawnMapName = spawnMapName;
 				SpawnMap = spawnMap;
-				SpawnZones = new List<SpawnZoneData>(spawnZones);
+				SpawnZones = new List<SpawnZone>(spawnZones);
+				CompositeZones = compositeZones;
 			}
 
 			public override string ToString()
@@ -427,8 +623,29 @@ namespace IcarusDataMiner.Miners
 			}
 		}
 
-		private class SpawnZoneData
+		private interface ISpawnZoneData
 		{
+			string? Id { get; }
+
+			string Name { get; }
+
+			FColor Color { get; }
+
+			IReadOnlyList<WeightedItem> Creatures { get; }
+
+			IReadOnlyList<string> AutonomousSpawnCreatures { get; }
+
+			int MinLevel { get; }
+
+			int MaxLevel { get; }
+
+			int SpawnDensity { get; }
+		}
+
+		private class SpawnZone : ISpawnZoneData
+		{
+			public string? Id => null;
+
 			public string Name { get; }
 
 			public FColor Color { get; }
@@ -437,18 +654,42 @@ namespace IcarusDataMiner.Miners
 
 			public int MaxLevel { get; }
 
+			public int SpawnDensity { get; }
+
+			public string? CompositeId { get; set; }
+
 			public IReadOnlyList<WeightedItem> Creatures { get; }
 
 			public IReadOnlyList<string> AutonomousSpawnCreatures { get; }
 
-			public SpawnZoneData(string name, FColor color, int minLevel, int maxLevel, IEnumerable<WeightedItem> creatures, IEnumerable<string> autonomousSpawnCreatures)
+			public SpawnZone(string name, FColor color, int minLevel, int maxLevel, int spawnDensity, IEnumerable<WeightedItem> creatures, IEnumerable<string> autonomousSpawnCreatures)
 			{
 				Name = name;
 				Color = color;
 				MinLevel = minLevel;
 				MaxLevel = maxLevel;
+				SpawnDensity = spawnDensity;
 				Creatures = new List<WeightedItem>(creatures);
 				AutonomousSpawnCreatures = new List<string>(autonomousSpawnCreatures);
+			}
+
+			public int GetCreatureHash()
+			{
+				if (Creatures.Count == 0 && AutonomousSpawnCreatures.Count == 0)
+				{
+					return 0;
+				}
+
+				int hash = 17;
+				foreach (WeightedItem creature in Creatures)
+				{
+					hash = hash * 23 + creature.GetHashCode();
+				}
+				foreach (string creature in AutonomousSpawnCreatures)
+				{
+					hash = hash * 23 + creature.GetHashCode();
+				}
+				return hash;
 			}
 
 			public override string ToString()
@@ -457,7 +698,81 @@ namespace IcarusDataMiner.Miners
 			}
 		}
 
-		private class WeightedItem : IComparable<WeightedItem>
+		private class CompositeSpawnZone : ISpawnZoneData, IEquatable<CompositeSpawnZone>, IComparable<CompositeSpawnZone>
+		{
+			public string? Id { get; }
+
+			public string Name { get; private set; }
+
+			public FColor Color { get; }
+
+			public IReadOnlyList<WeightedItem> Creatures { get; }
+
+			public IReadOnlyList<string> AutonomousSpawnCreatures { get; }
+
+			public int MinLevel => -1;
+
+			public int MaxLevel => -1;
+
+			public int SpawnDensity { get; }
+
+			public int CreatureHash { get; }
+
+			public CompositeSpawnZone(string id, int creatureHash, SpawnZone firstZone)
+			{
+				Id = id;
+				Name = TrimName(firstZone.Name);
+				Color = firstZone.Color;
+				Creatures = firstZone.Creatures.ToArray();
+				AutonomousSpawnCreatures = firstZone.AutonomousSpawnCreatures.ToArray();
+				SpawnDensity = firstZone.SpawnDensity;
+				CreatureHash = creatureHash;
+			}
+
+			public void UpdateName(string newName)
+			{
+				string name = TrimName(newName);
+				if (name.Length < Name.Length)
+				{
+					Name = name;
+				}
+			}
+
+			public override int GetHashCode()
+			{
+				return Id!.GetHashCode();
+			}
+
+			public bool Equals(CompositeSpawnZone? other)
+			{
+				return other is not null && Id!.Equals(other.Id);
+			}
+
+			public override bool Equals(object? obj)
+			{
+				return obj is CompositeSpawnZone other && Equals(other);
+			}
+
+			public int CompareTo(CompositeSpawnZone? other)
+			{
+				return other is null ? 1 : Id!.CompareTo(other.Id);
+			}
+
+			private static string TrimName(string name)
+			{
+				int underscoreIndex = name.LastIndexOf('_');
+				if (underscoreIndex >= 0)
+				{
+					if (int.TryParse(name[(underscoreIndex + 1)..], out int _))
+					{
+						return name[..underscoreIndex];
+					}
+				}
+				return name;
+			}
+		}
+
+		private class WeightedItem : IEquatable<WeightedItem>, IComparable<WeightedItem>
 		{
 			public string Name { get; }
 
@@ -467,6 +782,24 @@ namespace IcarusDataMiner.Miners
 			{
 				Name = name;
 				Weight = weight;
+			}
+
+			public override int GetHashCode()
+			{
+				int hash = 17;
+				hash = hash * 23 + Name.GetHashCode();
+				hash = hash * 23 + Weight.GetHashCode();
+				return hash;
+			}
+
+			public bool Equals(WeightedItem? other)
+			{
+				return other is not null && Name.Equals(other.Name) && Weight.Equals(other.Weight);
+			}
+
+			public override bool Equals(object? obj)
+			{
+				return obj is WeightedItem other && Equals(other);
 			}
 
 			public override string ToString()

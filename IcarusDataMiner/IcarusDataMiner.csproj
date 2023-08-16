@@ -15,6 +15,7 @@
   <ItemGroup>
     <None Remove="Resources\icon_cave.png" />
     <None Remove="Resources\icon_exotic.png" />
+    <None Remove="Resources\icon_exoticseed.png" />
     <None Remove="Resources\icon_redexotic.png" />
   </ItemGroup>
 
@@ -30,6 +31,7 @@
   <ItemGroup>
     <EmbeddedResource Include="Resources\icon_cave.png" />
     <EmbeddedResource Include="Resources\icon_exotic.png" />
+    <EmbeddedResource Include="Resources\icon_exoticseed.png" />
     <EmbeddedResource Include="Resources\icon_redexotic.png" />
   </ItemGroup>
 
