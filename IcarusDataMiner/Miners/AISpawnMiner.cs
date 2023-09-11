@@ -567,7 +567,7 @@ namespace IcarusDataMiner.Miners
 								outData = image.Encode(SKEncodedImageFormat.Png, 100);
 							}
 
-							string zoneFileName = $"{spawnZone.Color.A}_{spawnZone.Name}";
+							string zoneFileName = $"{spawnZone.CompositeId}_{spawnZone.Color.A}_{spawnZone.Name}";
 							for (int i = 1; !seenZoneFileNames.Add(zoneFileName); ++i)
 							{
 								zoneFileName = $"{spawnZone.Name}_{i}";

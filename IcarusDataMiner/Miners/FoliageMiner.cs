@@ -22,6 +22,7 @@ using CUE4Parse.UE4.Objects.UObject;
 using CUE4Parse.UE4.Readers;
 using Newtonsoft.Json;
 using SkiaSharp;
+using System.Security.AccessControl;
 
 namespace IcarusDataMiner.Miners
 {
@@ -49,6 +50,7 @@ namespace IcarusDataMiner.Miners
 		private const float MaxPointSize = (float)(GroupDistanceThreshold * WorldDataUtil.WorldToMap);
 
 		private static Dictionary<string, string> sPlantMap;
+		private static Dictionary<string, string> sMiscMap;
 
 		public string Name => "Foliage";
 
@@ -83,7 +85,7 @@ namespace IcarusDataMiner.Miners
 
 				{ "FT_Coffee", "Coffee" },
 
-				// There are many instances of this, but sure what it actually is
+				// There are many instances of this, but not sure what it actually is
 				//{ "FT_ConiferFlower_01", "Flower" },
 
 				// Corn cobs can be found laying on the ground near corn stalks
@@ -101,25 +103,29 @@ namespace IcarusDataMiner.Miners
 				{ "FT_TU_Pumpkin", "Pumpkin" },
 
 				{ "FT_ReedFlower_01", "Reed" },
-				
+
 				{ "FT_Sponge_01", "Sponge" },
 
 				{ "FT_Squash", "Squash" },
 				{ "FT_LC_Squash", "Squash" },
 
 				{ "FT_Tomatoes_Wild", "Tomato" },
-				
+
 				{ "FT_Watermelon", "Watermelon" },
-				
+
 				{ "FT_Wheat_03", "Wheat" },
 
 				{ "FT_WildTea", "WildTea" },
 				{ "FT_LC_WildTea", "WildTea" },
 
 				{ "FT_YeastPlant_01", "Yeast" },
+			};
 
-				// The entries beyond this point are just for visualizing specific data that was of interest for one reason or another.
+			sMiscMap = new Dictionary<string, string>()
+			{
+				// These entries are just for visualizing specific data that was of interest for one reason or another.
 				// These are not typical harvestable plants like the rest of the list.
+				// These are not included in the composite output images.
 
 				{ "FT_Breakable_Scoria_Var1", "Scoria" },
 				{ "FT_Breakable_Scoria_Var2", "Scoria" },
@@ -175,7 +181,7 @@ namespace IcarusDataMiner.Miners
 
 		public bool Run(IProviderManager providerManager, Config config, Logger logger)
 		{
-			IReadOnlyDictionary<string, string> meshMap = LoadFoliageMeshMap(providerManager, logger);
+			IReadOnlyDictionary<string, FoliageTypeData> meshMap = LoadFoliageMap(providerManager, logger);
 
 			foreach (WorldData world in providerManager.WorldDataUtil.Rows)
 			{
@@ -203,7 +209,7 @@ namespace IcarusDataMiner.Miners
 			return true;
 		}
 
-		private void ProcessMap(GameFile mapAsset, IProviderManager providerManager, WorldData worldData, IReadOnlyDictionary<string, string> meshMap, Config config, Logger logger)
+		private void ProcessMap(GameFile mapAsset, IProviderManager providerManager, WorldData worldData, IReadOnlyDictionary<string, FoliageTypeData> meshMap, Config config, Logger logger)
 		{
 			Dictionary<string, FoliageData> foliageData = new();
 
@@ -317,17 +323,88 @@ namespace IcarusDataMiner.Miners
 		private void ExportImages(string mapName, IProviderManager providerManager, WorldData worldData, IReadOnlyDictionary<string, FoliageData> foliageData, Config config, Logger logger)
 		{
 			MapOverlayBuilder mapBuilder = MapOverlayBuilder.Create(worldData, providerManager.AssetProvider);
+			MapOverlayBuilder compositeMapBuilder = MapOverlayBuilder.Create(worldData, providerManager.AssetProvider);
 			foreach (var pair in foliageData)
 			{
 				logger.Log(LogLevel.Debug, $"Generating image for {pair.Key}");
 
-				mapBuilder.AddLocations(pair.Value.Clusters!.Select(c => new MapLocation(new FVector(c.CenterX, c.CenterY, 0.0f), Math.Min((float)Math.Log2(c.Count) + 3.0f, 10.0f))));
-				SKData outData = mapBuilder.DrawOverlay();
-				mapBuilder.ClearLocations();
+				// Create "Dots" map
+				{
+					mapBuilder.AddLocations(pair.Value.Clusters!.Select(c => new MapLocation(new FVector(c.CenterX, c.CenterY, 0.0f), Math.Min((float)Math.Log2(c.Count) + 3.0f, 10.0f) * 0.5f)));
+					SKData outData = mapBuilder.DrawOverlay();
+					mapBuilder.ClearLocations();
+
+					string outDir = Path.Combine(config.OutputDirectory, Name, "Visual", mapName);
+					Directory.CreateDirectory(outDir);
+					string outPath = Path.Combine(outDir, "Dots", $"{mapName}_{pair.Key}.png");
+					using (FileStream outStream = IOUtil.CreateFile(outPath, logger))
+					{
+						outData.SaveTo(outStream);
+					}
+				}
+
+				// Create "Icons" map
+				using SKBitmap? bitmap = pair.Value.IconPath is null ? null : AssetUtil.LoadAndDecodeTexture(pair.Key, pair.Value.IconPath, providerManager.AssetProvider, logger);
+				if (bitmap is not null)
+				{
+					const int size = 32;
+
+					SKImageInfo surfaceInfo = new()
+					{
+						Width = size,
+						Height = size,
+						ColorSpace = SKColorSpace.CreateSrgb(),
+						ColorType = SKColorType.Rgba8888,
+						AlphaType = SKAlphaType.Premul
+					};
+
+					using SKBitmap scaled = new(surfaceInfo);
+					bitmap.ScalePixels(scaled, SKFilterQuality.High);
+
+					using SKPaint paint = new()
+					{
+						ImageFilter = SKImageFilter.CreateDropShadow(0.0f, 0.0f, 2.0f, 2.0f, SKColors.White)
+					};
+
+					SKImage icon;
+					using (SKSurface surface = SKSurface.Create(surfaceInfo))
+					{
+						SKCanvas canvas = surface.Canvas;
+
+						canvas.DrawBitmap(scaled, 0.0f, 0.0f, paint);
+
+						surface.Flush();
+						icon = surface.Snapshot();
+					}
+
+					IEnumerable<MapLocation> locations = pair.Value.Clusters!.Select(c => new MapLocation(new FVector(c.CenterX, c.CenterY, 0.0f)));
+					{
+						mapBuilder.AddLocations(locations, icon);
+						SKData outData = mapBuilder.DrawOverlay();
+						mapBuilder.ClearLocations();
+
+						string outDir = Path.Combine(config.OutputDirectory, Name, "Visual", mapName);
+						Directory.CreateDirectory(outDir);
+						string outPath = Path.Combine(outDir, "Icons", $"{mapName}_{pair.Key}.png");
+						using (FileStream outStream = IOUtil.CreateFile(outPath, logger))
+						{
+							outData.SaveTo(outStream);
+						}
+					}
+
+					// Also add to composite map
+					compositeMapBuilder.AddLocations(locations, icon);
+				}
+			}
+
+			// Output composite map
+			{
+				SKData outData = compositeMapBuilder.DrawOverlay();
+				compositeMapBuilder.ClearLocations(true);
 
 				string outDir = Path.Combine(config.OutputDirectory, Name, "Visual");
 				Directory.CreateDirectory(outDir);
-				string outPath = Path.Combine(outDir, $"{mapName}_{pair.Key}.png");
+				string outPath = Path.Combine(outDir, mapName, $"{mapName}.png");
 				using (FileStream outStream = IOUtil.CreateFile(outPath, logger))
 				{
 					outData.SaveTo(outStream);
@@ -335,9 +412,9 @@ namespace IcarusDataMiner.Miners
 			}
 		}
 
-		private IReadOnlyDictionary<string, string> LoadFoliageMeshMap(IProviderManager providerManager, Logger logger)
+		private static IReadOnlyDictionary<string, FoliageTypeData> LoadFoliageMap(IProviderManager providerManager, Logger logger)
 		{
-			Dictionary<string, string> meshPaths = new();
+			Dictionary<string, FoliageTypeData> foliageMap = new();
 
 			GameFile file = providerManager.DataProvider.Files["FLOD/D_FLODDescriptions.json"];
 
@@ -345,7 +422,7 @@ namespace IcarusDataMiner.Miners
 			using (StreamReader stream = new StreamReader(archive))
 			using (JsonReader reader = new JsonTextReader(stream))
 			{
-				string? foliageType = null, meshPath = null;
+				string? foliageType = null, meshPath = null, blueprintPath = null;
 
 				FlodParseState state = FlodParseState.SearchingForRows;
 				int objectDepth = 0;
@@ -386,7 +463,11 @@ namespace IcarusDataMiner.Miners
 								}
 								else if (reader.Value!.Equals("FoliageType"))
 								{
-									meshPath = reader.ReadAsString();
+									meshPath = reader.ReadAsString()!;
+								}
+								else if (reader.Value!.Equals("ViewTraceActor"))
+								{
+									blueprintPath = reader.ReadAsString()!;
 								}
 								else
 								{
@@ -395,14 +476,28 @@ namespace IcarusDataMiner.Miners
 							}
 							if (reader.Depth < objectDepth)
 							{
-								if (foliageType != null && meshPath != null)
+								if (foliageType != null && meshPath != null && blueprintPath != null)
 								{
-									if (sPlantMap.TryGetValue(foliageType, out string? plantName))
+									string? plantName;
+									bool includeInComposite = true;
+									if (!sPlantMap.TryGetValue(foliageType, out plantName))
 									{
-										meshPaths.Add(GetMeshNameFromFoliage(meshPath, providerManager, logger), plantName);
+										includeInComposite = false;
+										sMiscMap.TryGetValue(foliageType, out plantName);
+									}
+									if (plantName is not null)
+									{
+										string meshName = GetMeshNameFromFoliage(meshPath, providerManager, logger);
+										FoliageTypeData foliageData = new()
+										{
+											PlantName = plantName,
+											IconPath = includeInComposite ? GetIconPathFromFoliage(blueprintPath, providerManager, logger) : null
+										};
+										foliageMap.Add(meshName, foliageData);
 									}
 									foliageType = null;
 									meshPath = null;
+									blueprintPath = null;
 								}
 								state = FlodParseState.InRows;
 							}
@@ -421,7 +516,7 @@ namespace IcarusDataMiner.Miners
 				}
 			}
 
-			return meshPaths;
+			return foliageMap;
 		}
 
 		private enum FlodParseState
@@ -433,7 +528,7 @@ namespace IcarusDataMiner.Miners
 			Done
 		}
 
-		private string GetMeshNameFromFoliage(string foliageAssetPath, IProviderManager providerManager, Logger logger)
+		private static string GetMeshNameFromFoliage(string foliageAssetPath, IProviderManager providerManager, Logger logger)
 		{
 			GameFile asset = providerManager.AssetProvider.Files[AssetUtil.GetPackageName(foliageAssetPath, "uasset")];
 			Package package = (Package)providerManager.AssetProvider.LoadPackage(asset);
@@ -444,7 +539,54 @@ namespace IcarusDataMiner.Miners
 			return meshIndex.Name;
 		}
 
-		private void FindFoliage(GameFile mapAsset, FVector origin, IDictionary<string, FoliageData> foliageData, IReadOnlyDictionary<string, string> meshMap, WorldData worldData, IProviderManager providerManager, Logger logger)
+		private static string? GetIconPathFromFoliage(string foliageAssetPath, IProviderManager providerManager, Logger logger)
+		{
+			GameFile asset = providerManager.AssetProvider.Files[AssetUtil.GetPackageName(foliageAssetPath, "uasset")];
+			Package package = (Package)providerManager.AssetProvider.LoadPackage(asset);
+
+			string className = foliageAssetPath[(foliageAssetPath.LastIndexOf('.') + 1)..];
+
+			FObjectExport? export = package.ExportMap.FirstOrDefault(oe => oe.ClassName.Equals(className));
+			if (export is null)
+			{
+				logger.Log(LogLevel.Warning, $"Could not locate class defaults for {className}. No icon will be associated with this foliage.");
+				return null;
+			}
+
+			string? rewardRowName = null;
+			try
+			{
+				UObject obj = export.ExportObject.Value;
+				FStructFallback? resourceRewardProperty = PropertyUtil.GetOrDefault<FStructFallback>(obj, "ResourceRewardRow");
+				if (resourceRewardProperty is null)
+				{
+					FStructFallback? breakableRockDataProperty = PropertyUtil.GetOrDefault<FStructFallback>(obj, "BreakableRockData");
+					if (breakableRockDataProperty is not null)
+					{
+						string breakableRockRowName = PropertyUtil.Get<FName>(breakableRockDataProperty, "RowName").Text;
+						rewardRowName = providerManager.DataTables.BreakableRockTable![breakableRockRowName].ItemReward.RowName;
+					}
+				}
+				else
+				{
+					rewardRowName = PropertyUtil.Get<FName>(resourceRewardProperty, "RowName").Text;
+				}
+			}
+			catch
+			{
+			}
+			if (rewardRowName is null)
+			{
+				logger.Log(LogLevel.Warning, $"Could not locate reward row value for {className}. No icon will be associated with this foliage.");
+				return null;
+			}
+
+			FItemRewards rewardsData = providerManager.DataTables.ItemRewardsTable![rewardRowName];
+			FItemableData itemdata = providerManager.DataTables.GetItemableData(rewardsData.Rewards[0]);
+			return itemdata.Icon.GetAssetPath();
+		}
+
+		private static void FindFoliage(GameFile mapAsset, FVector origin, IDictionary<string, FoliageData> foliageData, IReadOnlyDictionary<string, FoliageTypeData> meshMap, WorldData worldData, IProviderManager providerManager, Logger logger)
 		{
 			Package mapPackage = (Package)providerManager.AssetProvider.LoadPackage(mapAsset);
 
@@ -558,14 +700,15 @@ namespace IcarusDataMiner.Miners
 				}
 				if (meshName == null) continue;
 
-				string? foliageType;
+				FoliageTypeData foliageType;
 				if (!meshMap.TryGetValue(meshName, out foliageType)) continue;
+				if (foliageType.PlantName is null) continue;
 
 				FoliageData? foliage;
-				if (!foliageData.TryGetValue(foliageType, out foliage))
+				if (!foliageData.TryGetValue(foliageType.PlantName, out foliage))
 				{
-					foliage = new FoliageData(worldData.MinimapData!);
-					foliageData.Add(foliageType, foliage);
+					foliage = new FoliageData(worldData.MinimapData!, foliageType.IconPath);
+					foliageData.Add(foliageType.PlantName, foliage);
 				}
 
 				foreach (FInstancedStaticMeshInstanceData instanceData in fismObject.PerInstanceSMData)
@@ -587,7 +730,9 @@ namespace IcarusDataMiner.Miners
 
 			public IReadOnlyList<Cluster>? Clusters { get; private set; }
 
-			public FoliageData(MinimapData mapData)
+			public string? IconPath { get; }
+
+			public FoliageData(MinimapData mapData, string? iconPath)
 			{
 				mWorldBoundaryMin = mapData.WorldBoundaryMin;
 				mWorldBoundaryMax = mapData.WorldBoundaryMax;
@@ -607,6 +752,8 @@ namespace IcarusDataMiner.Miners
 						mCells[x, y] = new List<Cluster>();
 					}
 				}
+
+				IconPath = iconPath;
 			}
 
 			public bool AddInstance(FVector location)
@@ -673,7 +820,7 @@ namespace IcarusDataMiner.Miners
 					}
 				}
 
-				List<Cluster> clusters = new List<Cluster>();
+				List<Cluster> clusters = new();
 				for (int y = 0; y < mCellCountY; ++y)
 				{
 					for (int x = 0; x < mCellCountX; ++x)
@@ -689,6 +836,12 @@ namespace IcarusDataMiner.Miners
 				var cast = mCells.Cast<List<Cluster>>();
 				return $"{cast.Count(v => v.Count > 0)} cells | {cast.Sum(v => v.Count)} instances";
 			}
+		}
+
+		private struct FoliageTypeData
+		{
+			public string? PlantName;
+			public string? IconPath;
 		}
 
 		private struct Cluster

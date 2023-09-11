@@ -27,6 +27,9 @@ namespace IcarusDataMiner
 		// Used to adjust scaling for map images that do not use the standard world to map ratio.
 		private const float MapScaleFactor = (float)WorldDataUtil.MapToWorld * 0.5f;
 
+		private static readonly SKTypeface sTextTypeFace = SKTypeface.FromFamilyName("Segoe UI", SKFontStyleWeight.Normal, SKFontStyleWidth.Normal, SKFontStyleSlant.Upright);
+		private const float sTextSize = 18.0f;
+
 		private readonly List<LocationCollection> mLocationCollections;
 
 		private readonly float mOriginOffsetX, mOriginOffsetY;
@@ -113,8 +116,17 @@ namespace IcarusDataMiner
 		/// Clears all added locations. Typically called after DrawOverlay if you want to re-use the
 		/// same instance to draw a new overlay for the same map.
 		/// </summary>
-		public void ClearLocations()
+		/// <param name="disposeIcons">Whether to dispose icons associated with locations</param>
+		public void ClearLocations(bool disposeIcons = false)
 		{
+			if (disposeIcons)
+			{
+				foreach (LocationCollection collection in mLocationCollections)
+				{
+					collection.Icon?.Dispose();
+				}
+			}
+
 			mLocationCollections.Clear();
 		}
 
@@ -168,6 +180,16 @@ namespace IcarusDataMiner
 							Style = SKPaintStyle.Fill
 						};
 
+						using SKPaint textPaint = new()
+						{
+							Color = collection.Color,
+							IsAntialias = true,
+							Style = SKPaintStyle.Fill,
+							Typeface = sTextTypeFace,
+							TextSize = (float)Math.Round(sTextSize * sizeScale, MidpointRounding.AwayFromZero),
+							TextAlign = SKTextAlign.Center
+						};
+
 						foreach (MapLocation location in collection.Locations)
 						{
 							SKMatrix transform = baseMatrix;
@@ -181,27 +203,34 @@ namespace IcarusDataMiner
 
 							canvas.SetMatrix(transform);
 
-							switch (collection.Shape)
+							if (location is TextMapLocation textLocation)
 							{
-								case MarkerShape.Circle:
-									canvas.DrawCircle(SKPoint.Empty, locationRadius, paint);
-									break;
-								case MarkerShape.Square:
-									canvas.DrawRect(-locationRadius, -locationRadius, locationRadius * 2.0f, locationRadius * 2.0f, paint);
-									break;
+								canvas.DrawText(textLocation.Text, SKPoint.Empty, textPaint);
+							}
+							else
+							{
+								switch (collection.Shape)
+								{
+									case MarkerShape.Circle:
+										canvas.DrawCircle(SKPoint.Empty, locationRadius, paint);
+										break;
+									case MarkerShape.Square:
+										canvas.DrawRect(-locationRadius, -locationRadius, locationRadius * 2.0f, locationRadius * 2.0f, paint);
+										break;
+								}
 							}
 						}
 					}
 					else
 					{
-						int iconWidth = (int)Math.Round(Resources.Icon_Exotic.Width * (mWorldToMapX * MapScaleFactor));
-						int iconHeight = (int)Math.Round(Resources.Icon_Exotic.Height * (mWorldToMapY * MapScaleFactor));
+						int iconWidth = (int)Math.Round(collection.Icon.Width * (mWorldToMapX * MapScaleFactor));
+						int iconHeight = (int)Math.Round(collection.Icon.Height * (mWorldToMapY * MapScaleFactor));
 
 						float halfIconWidth = iconWidth * 0.5f;
 						float halfIconHeight = iconHeight * 0.5f;
 
-						float iconScaleX = (float)iconWidth / Resources.Icon_Exotic.Width;
-						float iconScaleY = (float)iconHeight / Resources.Icon_Exotic.Height;
+						float iconScaleX = (float)iconWidth / collection.Icon.Width;
+						float iconScaleY = (float)iconHeight / collection.Icon.Height;
 
 						foreach (MapLocation location in collection.Locations)
 						{
@@ -264,8 +293,8 @@ namespace IcarusDataMiner
 		/// The pixel diameter of the rendered shape
 		/// </summary>
 		/// <remarks>
-		/// The size only applies to "Shape" style locations. "Icon" locations will instead be sized based
-		/// on the size of the icon itself, ignoring this parameter.
+		/// The size only applies to "Shape" and "Text" style locations. "Icon" locations will instead be
+		/// sized based on the size of the icon itself, ignoring this parameter.
 		/// 
 		/// Even though the size is represented in texture pixels, it will be scaled for cases where the
 		/// world to map ratio is non-standard such that the size will remain fixed relative to the world
@@ -297,6 +326,23 @@ namespace IcarusDataMiner
 			: base(position, size)
 		{
 			RotationDegrees = rotationDegrees;
+		}
+	}
+
+	/// <summary>
+	/// A map location represented with text
+	/// </summary>
+	internal class TextMapLocation : MapLocation
+	{
+		/// <summary>
+		/// Text to display at the location
+		/// </summary>
+		public string Text { get; }
+
+		public TextMapLocation(FVector position, string text, float size = 1.0f)
+			: base(position, size)
+		{
+			Text = text;
 		}
 	}
 

@@ -40,5 +40,10 @@ namespace IcarusDataMiner
 		/// Provides info about prospects
 		/// </summary>
 		ProspectDataUtil ProspectDataUtil { get; }
+
+		/// <summary>
+		/// Game data tables
+		/// </summary>
+		DataTables DataTables { get; }
 	}
 }

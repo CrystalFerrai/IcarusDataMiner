@@ -65,7 +65,8 @@ namespace IcarusDataMiner
 			HashSet<string> treeNames = new HashSet<string>()
 			{
 				"Prospect_Olympus",
-				"Prospect_Styx"
+				"Prospect_Styx",
+				"Prospect_Prometheus"
 			};
 
 			Dictionary<string, string> activeProspects = new();

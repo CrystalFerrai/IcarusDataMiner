@@ -17,9 +17,12 @@ using CUE4Parse.UE4.Assets;
 using CUE4Parse.UE4.Assets.Exports;
 using CUE4Parse.UE4.Assets.Objects;
 using CUE4Parse.UE4.Objects.Core.Math;
+using CUE4Parse.UE4.Objects.GameplayTags;
 using CUE4Parse.UE4.Objects.UObject;
+using Newtonsoft.Json.Linq;
 using SkiaSharp;
 using System.IO.Enumeration;
+using System.Text;
 using System.Text.RegularExpressions;
 
 namespace IcarusDataMiner.Miners
@@ -42,7 +45,10 @@ namespace IcarusDataMiner.Miners
 		public bool Run(IProviderManager providerManager, Config config, Logger logger)
 		{
 			logger.Log(LogLevel.Information, "Loading cave templates...");
-			Dictionary<string, CaveTemplate> templates = new Dictionary<string, CaveTemplate>();
+			Dictionary<string, CaveTemplate> templates = new();
+
+			GameFile waterSetupFile = providerManager.DataProvider.Files["World/D_WaterSetup.json"];
+			IcarusDataTable<FWaterSetup> waterSetupTable = IcarusDataTable<FWaterSetup>.DeserializeTable("D_WaterSetup", Encoding.UTF8.GetString(waterSetupFile.Read()));
 
 			const string TemplateMatch = "Icarus/Content/Prefabs/Cave/*.uasset";
 
@@ -50,7 +56,7 @@ namespace IcarusDataMiner.Miners
 			{
 				if (FileSystemName.MatchesSimpleExpression(TemplateMatch, pair.Key))
 				{
-					CaveTemplate? template = LoadCaveTemplate(pair.Value, providerManager, config, logger);
+					CaveTemplate? template = LoadCaveTemplate(pair.Value, providerManager, waterSetupTable, config, logger);
 					if (template != null)
 					{
 						templates.Add(pair.Value.NameWithoutExtension, template);
@@ -74,7 +80,7 @@ namespace IcarusDataMiner.Miners
 			return true;
 		}
 
-		private CaveTemplate? LoadCaveTemplate(GameFile templateAsset, IProviderManager providerManager, Config config, Logger logger)
+		private CaveTemplate? LoadCaveTemplate(GameFile templateAsset, IProviderManager providerManager, IcarusDataTable<FWaterSetup> waterSetupTable, Config config, Logger logger)
 		{
 			Package templatePackage = (Package)providerManager.AssetProvider.LoadPackage(templateAsset);
 
@@ -113,7 +119,34 @@ namespace IcarusDataMiner.Miners
 					case "Lakes":
 						{
 							UScriptArray lakesArray = PropertyUtil.GetByIndex<UScriptArray>(templateObject, i);
-							template.LakeCount = lakesArray.Properties.Count;
+							int waterCount = 0, lavaCount = 0;
+							for (int j = 0; j < lakesArray.Properties.Count; ++j)
+							{
+								UScriptStruct lakeObject = (UScriptStruct)lakesArray.Properties[j].GetValue(typeof(UScriptStruct))!;
+								FStructFallback waterSetupProperty = PropertyUtil.Get<FStructFallback>((IPropertyHolder)lakeObject.StructType, "WaterSetup");
+								string waterSetupRowName = PropertyUtil.Get<FName>(waterSetupProperty, "RowName").Text;
+
+								bool isWater = false;
+								bool isLava = false;
+								foreach (FRowHandle mod in waterSetupTable[waterSetupRowName].WetModifiers)
+								{
+									switch (mod.RowName)
+									{
+										case "Wet":
+											isWater = true;
+											break;
+										case "Lava":
+											isLava = true;
+											break;
+									}
+								}
+
+								if (isWater) ++waterCount;
+								if (isLava) ++lavaCount;
+							}
+							template.TotalLakeCount = lakesArray.Properties.Count;
+							template.WaterCount = waterCount;
+							template.LavaCount = lavaCount;
 							break;
 						}
 					case "Foliage":
@@ -154,7 +187,15 @@ namespace IcarusDataMiner.Miners
 					case "DeepMiningOreDeposit":
 						{
 							UScriptArray veinArray = PropertyUtil.GetByIndex<UScriptArray>(templateObject, i);
-							template.VeinCount = veinArray.Properties.Count;
+							for (int j = 0; j < veinArray.Properties.Count; ++j)
+							{
+								UScriptStruct veinObject = (UScriptStruct)veinArray.Properties[j].GetValue(typeof(UScriptStruct))!;
+
+								FPropertyTag transformProperty = ((FStructFallback)veinObject.StructType).Properties[0];
+								FTransform transform = new((FStructFallback)transformProperty.Tag!.GetValue(typeof(FStructFallback))!);
+								template.DeepOreLocations.Add(new Locator(transform.Translation, transform.Rotator()));
+							}
+
 							break;
 						}
 					case "CaveActorSpawnMap":
@@ -256,18 +297,25 @@ namespace IcarusDataMiner.Miners
 					using (FileStream outStream = IOUtil.CreateFile(outPath, logger))
 					using (StreamWriter writer = new StreamWriter(outStream))
 					{
-						writer.WriteLine("Quad,ID,Template,Ore Foliage Type,Ore Count,Exotics,Veins,Worms,Lakes,Mushrooms,Entrance X,Entrance Y,Entrance Z,Entrance R,Entrance Grid");
+						writer.WriteLine("Quad,ID,Template,Ore Foliage Type,Ore Count,Exotics,DeepOres,DeepOreX,DeepOreY,DeepOreZ,Worms,Lakes,Water,Lava,Mushrooms,Entrance X,Entrance Y,Entrance Z,Entrance R,Entrance Grid");
 
 						foreach (CaveData cave in templateCaves)
 						{
 							if (cave.Template!.OreData.Count != 1) throw new NotImplementedException();
 							if (cave.Template!.Entrances.Count != 1) throw new NotImplementedException();
+							if (cave.DeepOreLocations.Count > 1) throw new NotImplementedException();
 
 							string wormCount = $"\"=\"\"{cave.Template.WormCountMin}-{cave.Template.WormCountMax}\"\"\""; // Weird format so that Excel won't interpret the field as a date
 
 							Locator entrance = cave.Entrances[0].Location;
+							string deepOrePos = ",,";
+							if (cave.DeepOreLocations.Count > 0)
+							{
+								Locator deepOre = cave.DeepOreLocations[0];
+								deepOrePos = $"{deepOre.Position.X},{deepOre.Position.Y},{deepOre.Position.Z}";
+							}
 
-							writer.WriteLine($"{cave.QuadName},{cave.ID},{cave.Template.Name},{cave.Template.OreData[0].Pool},{cave.Template.OreData[0].Count},{cave.Template.ExoticCount},{cave.Template.VeinCount},{wormCount},{cave.Template.LakeCount},{cave.Template.MushroomCount},{entrance.Position.X},{entrance.Position.Y},{entrance.Position.Z},{entrance.Rotation.Yaw},{worldData.GetGridCell(entrance.Position)}");
+							writer.WriteLine($"{cave.QuadName},{cave.QuadName[0]}-{cave.ID},{cave.Template.Name},{cave.Template.OreData[0].Pool},{cave.Template.OreData[0].Count},{cave.Template.ExoticCount},{cave.DeepOreLocations.Count},{deepOrePos},{wormCount},{cave.Template.TotalLakeCount},{cave.Template.WaterCount},{cave.Template.LavaCount},{cave.Template.MushroomCount},{entrance.Position.X},{entrance.Position.Y},{entrance.Position.Z},{entrance.Rotation.Yaw},{worldData.GetGridCell(entrance.Position)}");
 						}
 					}
 				}
@@ -279,6 +327,18 @@ namespace IcarusDataMiner.Miners
 					SKData outData = mapBuilder.DrawOverlay();
 
 					string outPath = Path.Combine(config.OutputDirectory, Name, "Visual", $"{mapAsset.NameWithoutExtension}.png");
+					using (FileStream outStream = IOUtil.CreateFile(outPath, logger))
+					{
+						outData.SaveTo(outStream);
+					}
+				}
+				// Labeled image
+				{
+					MapOverlayBuilder mapBuilder = MapOverlayBuilder.Create(worldData, providerManager.AssetProvider);
+					mapBuilder.AddLocations(templateCaves.SelectMany(c => c.Entrances.Select(e => new TextMapLocation(e.Location.Position, $"{c.QuadName[0]}-{c.ID}"))));
+					SKData outData = mapBuilder.DrawOverlay();
+
+					string outPath = Path.Combine(config.OutputDirectory, Name, "Visual", $"{mapAsset.NameWithoutExtension}-IDs.png");
 					using (FileStream outStream = IOUtil.CreateFile(outPath, logger))
 					{
 						outData.SaveTo(outStream);
@@ -447,7 +507,7 @@ namespace IcarusDataMiner.Miners
 					continue;
 				}
 
-				CaveData caveData = new CaveData(quadName);
+				CaveData caveData = new(quadName);
 				caveData.ID = match.Groups[1].Value.Length > 0 ? int.Parse(match.Groups[1].Value) : 0;
 
 				for (int i = 0; i < caveObject.Properties.Count; ++i)
@@ -458,7 +518,7 @@ namespace IcarusDataMiner.Miners
 						FPackageIndex prefabAssetProperty = (FPackageIndex)prop.Tag!.GetValue(typeof(FPackageIndex))!;
 						if (!templates.TryGetValue(prefabAssetProperty.Name, out CaveTemplate? template))
 						{
-							logger.Log(LogLevel.Warning, $"Template caves references template {prefabAssetProperty.Name} which has not been loaded. Cave will be missing information.");
+							logger.Log(LogLevel.Warning, $"Template cave references template {prefabAssetProperty.Name} which has not been loaded. Cave will be missing information.");
 							continue;
 						}
 
@@ -563,6 +623,17 @@ namespace IcarusDataMiner.Miners
 					entrance.Location = entranceLocation;
 				}
 
+				if (caveData.Template is not null)
+				{
+					// Convert deep ore locations from local space to world space and add to cave data
+					foreach (Locator deepOreLocal in caveData.Template.DeepOreLocations)
+					{
+						Locator deepOreGlobal = deepOreLocal;
+						deepOreGlobal.Transform(caveData.Location);
+						caveData.DeepOreLocations.Add(deepOreGlobal);
+					}
+				}
+
 				yield return caveData;
 			}
 		}
@@ -580,6 +651,8 @@ namespace IcarusDataMiner.Miners
 			public IList<CaveEntranceData> Entrances { get; } = new List<CaveEntranceData>();
 
 			public IList<CaveEntranceData> SpeculativeEntrances { get; } = new List<CaveEntranceData>();
+
+			public IList<Locator> DeepOreLocations { get; } = new List<Locator>();
 
 			internal UObject? RootComponent { get; set; }
 
@@ -627,15 +700,19 @@ namespace IcarusDataMiner.Miners
 			public string Name { get; set; }
 #nullable restore annotations
 
-			public List<Locator> Entrances { get; } = new List<Locator>();
+			public IList<Locator> Entrances { get; } = new List<Locator>();
 
 			public IList<OreData> OreData { get; } = new List<OreData>();
 
-			public int LakeCount { get; set; }
+			public int TotalLakeCount { get; set; }
+
+			public int WaterCount { get; set; }
+
+			public int LavaCount { get; set; }
 
 			public int ExoticCount { get; set; }
 
-			public int VeinCount { get; set; }
+			public IList<Locator> DeepOreLocations { get; } = new List<Locator>();
 
 			public int WormCountMin { get; set; }
 
@@ -690,5 +767,24 @@ namespace IcarusDataMiner.Miners
 				return $"{Position}, {Rotation}";
 			}
 		}
+
+#pragma warning disable CS0649 // Field never assigned to
+
+		struct FWaterSetup : IDataTableRow
+		{
+			public string Name { get; set; }
+			public JObject? Metadata { get; set; }
+
+			public ObjectPointer Material;
+			public List<FRowHandle> Fish;
+			public float FishDensity;
+			public ObjectPointer Sound;
+			public bool IsInCave;
+			public bool IsDrinkable;
+			public List<FRowHandle> WetModifiers;
+			//public FGameplayTagContainer GameplayTags;
+		}
+
+#pragma warning restore CS0649
 	}
 }
