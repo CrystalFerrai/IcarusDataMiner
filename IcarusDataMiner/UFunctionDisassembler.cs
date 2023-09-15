@@ -65,7 +65,7 @@ namespace IcarusDataMiner
 			EFunctionFlags functionFlags = (EFunctionFlags)function.FunctionFlags;
 
 			using UFunctionDisassembler instance = new(package, function);
-			List<Operation> operations = new List<Operation>();
+			List<Operation> operations = new();
 			string assembly = instance.Process(operations);
 
 			return new DisassembledFunction(functionFlags, operations, assembly);
@@ -73,18 +73,22 @@ namespace IcarusDataMiner
 
 		private string Process(IList<Operation> operations)
 		{
+			int offset = 0;
 			while (mStream.Position < mStream.Length)
 			{
-				ProcessExpr(operations);
+				ProcessExpr(operations, ref offset);
 			}
 
 			return mWriter.ToString();
 		}
 
 		// Based on ProcessCommon from ScriptDisassembler.cpp. Adapted to read serialized data.
-		private EExprToken ProcessExpr(IList<Operation> operations)
+		// Offset calculation is based on deserialized data. Sizes referenced from ScriptSerialization.h
+		// which is inlined into UStruct::Serialize in Class.cpp.
+		private EExprToken ProcessExpr(IList<Operation> operations, ref int offset)
 		{
-			EExprToken opcode = (EExprToken)mReader.ReadByte();
+			int opOffset = offset;
+			EExprToken opcode = (EExprToken)ReadByte(ref offset);
 			++mIndentLevel;
 
 			switch (opcode)
@@ -92,26 +96,26 @@ namespace IcarusDataMiner
 				case EExprToken.PrimitiveCast:
 					{
 						// A type conversion.
-						byte conversionType = mReader.ReadByte();
-						Log(opcode, $"Type {conversionType}");
+						byte conversionType = ReadByte(ref offset);
+						Log(opOffset, opcode, $"Type {conversionType}");
 
 						List<Operation> childOperations = new();
 
 						Log("Argument:");
-						ProcessExpr(childOperations);
+						ProcessExpr(childOperations, ref offset);
 
 						operations.Add(new Operation<byte>(opcode, conversionType, childOperations));
 						break;
 					}
 				case EExprToken.SetSet:
 					{
-						Log(opcode);
+						Log(opOffset, opcode);
 
 						List<Operation> childOperations = new();
 
-						ProcessExpr(childOperations);
-						mReader.ReadInt32();
-						while (ProcessExpr(childOperations) != EExprToken.EndSet)
+						ProcessExpr(childOperations, ref offset);
+						ReadInt32(ref offset);
+						while (ProcessExpr(childOperations, ref offset) != EExprToken.EndSet)
 						{
 							// Set contents
 						}
@@ -121,42 +125,42 @@ namespace IcarusDataMiner
 					}
 				case EExprToken.EndSet:
 					{
-						Log(opcode);
+						Log(opOffset, opcode);
 						operations.Add(new Operation(opcode));
 						break;
 					}
 				case EExprToken.SetConst:
 					{
-						MemberReference? innerProp = ReadPointer();
+						FieldReference? innerProp = ReadField(ref offset);
 
-						int num = mReader.ReadInt32();
-						Log(opcode, $"Elements number: {num}, inner property: {innerProp}");
+						int count = ReadInt32(ref offset);
+						Log(opOffset, opcode, $"Element count: {count}, inner property: {innerProp}");
 
 						List<Operation> childOperations = new();
-						while (ProcessExpr(childOperations) != EExprToken.EndSetConst)
+						while (ProcessExpr(childOperations, ref offset) != EExprToken.EndSetConst)
 						{
 							// Set contents
 						}
 
-						operations.Add(new Operation<int>(opcode, num, childOperations));
+						operations.Add(new Operation<int>(opcode, count, childOperations));
 						break;
 					}
 				case EExprToken.EndSetConst:
 					{
-						Log(opcode);
+						Log(opOffset, opcode);
 						operations.Add(new Operation(opcode));
 						break;
 					}
 				case EExprToken.SetMap:
 					{
 						List<Operation> keyOperations = new(1);
-						ProcessExpr(keyOperations);
+						ProcessExpr(keyOperations, ref offset);
 
-						Log(opcode);
-						mReader.ReadInt32();
+						int count = ReadInt32(ref offset);
+						Log(opOffset, opcode, $"Element count: {count}");
 
 						List<Operation> valueOperations = new();
-						while (ProcessExpr(valueOperations) != EExprToken.EndMap)
+						while (ProcessExpr(valueOperations, ref offset) != EExprToken.EndMap)
 						{
 							// Map contents
 						}
@@ -166,20 +170,20 @@ namespace IcarusDataMiner
 					}
 				case EExprToken.EndMap:
 					{
-						Log(opcode);
+						Log(opOffset, opcode);
 						operations.Add(new Operation(opcode));
 						break;
 					}
 				case EExprToken.MapConst:
 					{
-						MemberReference? keyProp = ReadPointer();
-						MemberReference? valueProp = ReadPointer();
+						FieldReference? keyProp = ReadField(ref offset);
+						FieldReference? valueProp = ReadField(ref offset);
 
-						int num = mReader.ReadInt32();
-						Log(opcode, $"Elements number: {num}, key property: {keyProp}, val property: {valueProp}");
+						int count = ReadInt32(ref offset);
+						Log(opOffset, opcode, $"Element count: {count}, key property: {keyProp}, value property: {valueProp}");
 
 						List<Operation> childOperations = new();
-						while (ProcessExpr(childOperations) != EExprToken.EndMapConst)
+						while (ProcessExpr(childOperations, ref offset) != EExprToken.EndMapConst)
 						{
 							// Map contents
 						}
@@ -189,7 +193,7 @@ namespace IcarusDataMiner
 					}
 				case EExprToken.EndMapConst:
 					{
-						Log(opcode);
+						Log(opOffset, opcode);
 						operations.Add(new Operation(opcode));
 						break;
 					}
@@ -201,21 +205,21 @@ namespace IcarusDataMiner
 						// We use a different bytecode to avoid the branching each time we process a cast token
 
 						// the interface class to convert to
-						string? interfaceClassName = ReadResource().ObjectName.Text;
+						string? interfaceClassName = ReadObject(ref offset).ObjectName.Text;
 
-						Log(opcode, $"Cast to {interfaceClassName}");
+						Log(opOffset, opcode, $"Cast to {interfaceClassName}");
 
 						List<Operation> childOperations = new(1);
-						ProcessExpr(childOperations);
+						ProcessExpr(childOperations, ref offset);
 
 						operations.Add(new Operation<string?>(opcode, interfaceClassName, childOperations));
 						break;
 					}
 				case EExprToken.Let:
 					{
-						Log(opcode, $"Variable = Expression");
+						Log(opOffset, opcode, "Variable = Expression");
 
-						ReadPointer();
+						ReadField(ref offset);
 
 						++mIndentLevel;
 
@@ -223,11 +227,11 @@ namespace IcarusDataMiner
 
 						// Variable expr.
 						Log("Variable:");
-						ProcessExpr(childOperations);
+						ProcessExpr(childOperations, ref offset);
 
 						// Assignment expr.
 						Log("Expression:");
-						ProcessExpr(childOperations);
+						ProcessExpr(childOperations, ref offset);
 
 						--mIndentLevel;
 
@@ -240,7 +244,7 @@ namespace IcarusDataMiner
 				case EExprToken.LetDelegate:
 				case EExprToken.LetMulticastDelegate:
 					{
-						Log(opcode, $"Variable = Expression");
+						Log(opOffset, opcode, "Variable = Expression");
 
 						List<Operation> childOperations = new(2);
 
@@ -248,11 +252,11 @@ namespace IcarusDataMiner
 
 						// Variable expr.
 						Log("Variable:");
-						ProcessExpr(childOperations);
+						ProcessExpr(childOperations, ref offset);
 
 						// Assignment expr.
 						Log("Expression:");
-						ProcessExpr(childOperations);
+						ProcessExpr(childOperations, ref offset);
 
 						--mIndentLevel;
 
@@ -261,50 +265,50 @@ namespace IcarusDataMiner
 					}
 				case EExprToken.LetValueOnPersistentFrame:
 					{
-						Log(opcode);
+						Log(opOffset, opcode);
 
 						++mIndentLevel;
 
-						MemberReference? prop = ReadPointer();
+						FieldReference? prop = ReadField(ref offset);
 						Log($"Destination variable: {prop}");
 
 						List<Operation> childOperations = new(1);
 
 						Log("Expression:");
-						ProcessExpr(childOperations);
+						ProcessExpr(childOperations, ref offset);
 
 						--mIndentLevel;
 
-						operations.Add(new Operation<MemberReference?>(opcode, prop, childOperations));
+						operations.Add(new Operation<FieldReference?>(opcode, prop, childOperations));
 						break;
 					}
 				case EExprToken.StructMemberContext:
 					{
-						Log(opcode);
+						Log(opOffset, opcode);
 
 						++mIndentLevel;
 
-						MemberReference? prop = ReadPointer();
+						FieldReference? prop = ReadField(ref offset);
 						Log($"Member name: {prop}");
 
 						List<Operation> childOperations = new(1);
 
 						Log("Expression to struct:");
-						ProcessExpr(childOperations);
+						ProcessExpr(childOperations, ref offset);
 
 						--mIndentLevel;
 
-						operations.Add(new Operation<MemberReference?>(opcode, prop, childOperations));
+						operations.Add(new Operation<FieldReference?>(opcode, prop, childOperations));
 						break;
 					}
 				case EExprToken.LocalVirtualFunction:
 				case EExprToken.VirtualFunction:
 					{
-						string? functionName = ReadName();
-						Log(opcode, functionName);
+						string? functionName = ReadName(ref offset);
+						Log(opOffset, opcode, functionName);
 
 						List<Operation> childOperations = new();
-						while (ProcessExpr(childOperations) != EExprToken.EndFunctionParms)
+						while (ProcessExpr(childOperations, ref offset) != EExprToken.EndFunctionParms)
 						{
 						}
 						operations.Add(new Operation<string?>(opcode, functionName, childOperations));
@@ -314,12 +318,12 @@ namespace IcarusDataMiner
 				case EExprToken.FinalFunction:
 				case EExprToken.CallMath:
 					{
-						FObjectResource stackNode = ReadResource();
+						FObjectResource stackNode = ReadObject(ref offset);
 						string functionName = $"{stackNode.OuterIndex.Name}::{stackNode.ObjectName.Text}";
-						Log(opcode, functionName);
+						Log(opOffset, opcode, functionName);
 
 						List<Operation> childOperations = new();
-						while (ProcessExpr(childOperations) != EExprToken.EndFunctionParms)
+						while (ProcessExpr(childOperations, ref offset) != EExprToken.EndFunctionParms)
 						{
 							// Params
 						}
@@ -328,12 +332,12 @@ namespace IcarusDataMiner
 					}
 				case EExprToken.ComputedJump:
 					{
-						Log(opcode, "Offset specified by expression:");
+						Log(opOffset, opcode, "Offset specified by expression:");
 
 						++mIndentLevel;
 
 						List<Operation> childOperations = new(1);
-						ProcessExpr(childOperations);
+						ProcessExpr(childOperations, ref offset);
 
 						--mIndentLevel;
 
@@ -343,8 +347,8 @@ namespace IcarusDataMiner
 
 				case EExprToken.Jump:
 					{
-						int skipCount = mReader.ReadInt32();
-						Log(opcode, $"Offset = 0x{skipCount:X}");
+						int skipCount = ReadInt32(ref offset);
+						Log(opOffset, opcode, $"Offset = 0x{skipCount:X}");
 						break;
 					}
 				case EExprToken.LocalVariable:
@@ -353,24 +357,24 @@ namespace IcarusDataMiner
 				case EExprToken.LocalOutVariable:
 				case EExprToken.ClassSparseDataVariable:
 					{
-						MemberReference? property = ReadPointer();
-						Log(opcode, property?.ToString());
+						FieldReference? property = ReadField(ref offset);
+						Log(opOffset, opcode, property?.ToString());
 
-						operations.Add(new Operation<MemberReference?>(opcode, property));
+						operations.Add(new Operation<FieldReference?>(opcode, property));
 						break;
 					}
 				case EExprToken.InterfaceContext:
 				case EExprToken.Return:
 					{
-						Log(opcode);
+						Log(opOffset, opcode);
 						List<Operation> childOperations = new(1);
-						ProcessExpr(childOperations);
+						ProcessExpr(childOperations, ref offset);
 						operations.Add(new Operation(opcode, childOperations));
 						break;
 					}
 				case EExprToken.DeprecatedOp4A:
 					{
-						Log(opcode, "This opcode has been removed and does nothing.");
+						Log(opOffset, opcode, "This opcode has been removed and does nothing.");
 						operations.Add(new Operation(opcode));
 						break;
 					}
@@ -389,25 +393,25 @@ namespace IcarusDataMiner
 				case EExprToken.Self:
 				case EExprToken.EndParmValue:
 					{
-						Log(opcode);
+						Log(opOffset, opcode);
 						operations.Add(new Operation(opcode));
 						break;
 					}
 				case EExprToken.CallMulticastDelegate:
 					{
-						FObjectResource stackNode = ReadResource();
+						FObjectResource stackNode = ReadObject(ref offset);
 						string functionName = $"{stackNode.OuterIndex.Name}::{stackNode.ObjectName.Text}";
-						Log(opcode, functionName);
+						Log(opOffset, opcode, functionName);
 
-						List<Operation> targetOperation = new List<Operation>(1);
-						ProcessExpr(targetOperation);
+						List<Operation> targetOperation = new(1);
+						ProcessExpr(targetOperation, ref offset);
 
 						++mIndentLevel;
 
 						Log("Params:");
 
 						List<Operation> childOperations = new();
-						while (ProcessExpr(childOperations) != EExprToken.EndFunctionParms)
+						while (ProcessExpr(childOperations, ref offset) != EExprToken.EndFunctionParms)
 						{
 							// Params
 						}
@@ -420,14 +424,14 @@ namespace IcarusDataMiner
 				case EExprToken.Context:
 				case EExprToken.Context_FailSilent:
 					{
-						Log(opcode);
+						Log(opOffset, opcode);
 
 						++mIndentLevel;
 
 						// Object expression.
 						Log("ObjectExpression:");
-						List<Operation> objectExpression = new List<Operation>(1);
-						ProcessExpr(objectExpression);
+						List<Operation> objectExpression = new(1);
+						ProcessExpr(objectExpression, ref offset);
 
 						bool canFailSilently = opcode == EExprToken.Context_FailSilent;
 						if (canFailSilently)
@@ -436,17 +440,17 @@ namespace IcarusDataMiner
 						}
 
 						// Code offset for NULL expressions.
-						int skipCount = mReader.ReadInt32();
-						Log($"Skip 0x{skipCount:X} bytes");
+						int skipCount = ReadInt32(ref offset);
+						Log($"Skip {skipCount} bytes");
 
 						// Property corresponding to the r-value data, in case the l-value needs to be mem-zero'd
-						MemberReference? field = ReadPointer();
+						FieldReference? field = ReadField(ref offset);
 						Log($"R-Value Property: {field}");
 
 						// Context expression.
 						Log("ContextExpression:");
-						List<Operation> contextExpression = new List<Operation>(1);
-						ProcessExpr(contextExpression);
+						List<Operation> contextExpression = new(1);
+						ProcessExpr(contextExpression, ref offset);
 
 						--mIndentLevel;
 
@@ -455,96 +459,96 @@ namespace IcarusDataMiner
 					}
 				case EExprToken.IntConst:
 					{
-						int constValue = mReader.ReadInt32();
-						Log(opcode, constValue.ToString());
+						int constValue = ReadInt32(ref offset);
+						Log(opOffset, opcode, constValue.ToString());
 						operations.Add(new Operation<int>(opcode, constValue));
 						break;
 					}
 				case EExprToken.Int64Const:
 					{
-						long constValue = mReader.ReadInt64();
-						Log(opcode, constValue.ToString());
+						long constValue = ReadInt64(ref offset);
+						Log(opOffset, opcode, constValue.ToString());
 						operations.Add(new Operation<long>(opcode, constValue));
 						break;
 					}
 				case EExprToken.UInt64Const:
 					{
-						ulong constValue = mReader.ReadUInt64();
-						Log(opcode, constValue.ToString());
+						ulong constValue = ReadUInt64(ref offset);
+						Log(opOffset, opcode, constValue.ToString());
 						operations.Add(new Operation<ulong>(opcode, constValue));
 						break;
 					}
 				case EExprToken.SkipOffsetConst:
 					{
-						int constValue = mReader.ReadInt32();
-						Log(opcode, constValue.ToString());
+						int constValue = ReadInt32(ref offset);
+						Log(opOffset, opcode, constValue.ToString());
 						operations.Add(new Operation<int>(opcode, constValue));
 						break;
 					}
 				case EExprToken.FloatConst:
 					{
-						float constValue = mReader.ReadSingle();
-						Log(opcode, constValue.ToString("0.0###"));
+						float constValue = ReadSingle(ref offset);
+						Log(opOffset, opcode, constValue.ToString("0.0###"));
 						operations.Add(new Operation<float>(opcode, constValue));
 						break;
 					}
 				case EExprToken.StringConst:
 					{
-						string constValue = ReadAsciiString();
-						Log(opcode, constValue);
+						string constValue = ReadAsciiString(ref offset);
+						Log(opOffset, opcode, constValue);
 						operations.Add(new Operation<string>(opcode, constValue));
 						break;
 					}
 				case EExprToken.UnicodeStringConst:
 					{
-						string constValue = ReadUnicodeString();
-						Log(opcode, constValue);
+						string constValue = ReadUnicodeString(ref offset);
+						Log(opOffset, opcode, constValue);
 						operations.Add(new Operation<string>(opcode, constValue));
 						break;
 					}
 				case EExprToken.TextConst:
 					{
 						// What kind of text are we dealing with?
-						EBlueprintTextLiteralType textLiteralType = (EBlueprintTextLiteralType)mReader.ReadByte();
+						EBlueprintTextLiteralType textLiteralType = (EBlueprintTextLiteralType)ReadByte(ref offset);
 
 						List<string> values = new();
 						switch (textLiteralType)
 						{
 							case EBlueprintTextLiteralType.Empty:
 								{
-									Log(opcode, "Empty");
+									Log(opOffset, opcode, "Empty");
 								}
 								break;
 
 							case EBlueprintTextLiteralType.LocalizedText:
 								{
-									string sourceString = ReadString(); values.Add(sourceString);
-									string keyString = ReadString(); values.Add(keyString);
-									string namespaceString = ReadString(); values.Add(namespaceString);
-									Log(opcode, $"Localized: {{ namespace: \"{namespaceString}\", key: \"{keyString}\", source: \"{sourceString}\" }}");
+									string sourceString = ReadString(ref offset); values.Add(sourceString);
+									string keyString = ReadString(ref offset); values.Add(keyString);
+									string namespaceString = ReadString(ref offset); values.Add(namespaceString);
+									Log(opOffset, opcode, $"Localized: {{ namespace: \"{namespaceString}\", key: \"{keyString}\", source: \"{sourceString}\" }}");
 								}
 								break;
 
 							case EBlueprintTextLiteralType.InvariantText:
 								{
-									string sourceString = ReadString(); values.Add(sourceString);
-									Log(opcode, $"Invariant: \"{sourceString}\"");
+									string sourceString = ReadString(ref offset); values.Add(sourceString);
+									Log(opOffset, opcode, $"Invariant: \"{sourceString}\"");
 								}
 								break;
 
 							case EBlueprintTextLiteralType.LiteralString:
 								{
-									string sourceString = ReadString(); values.Add(sourceString);
-									Log(opcode, $"Literal: \"{sourceString}\"");
+									string sourceString = ReadString(ref offset); values.Add(sourceString);
+									Log(opOffset, opcode, $"Literal: \"{sourceString}\"");
 								}
 								break;
 
 							case EBlueprintTextLiteralType.StringTableEntry:
 								{
-									ReadResource(); // String Table asset (if any)
-									string tableIdString = ReadString(); values.Add(tableIdString);
-									string keyString = ReadString(); values.Add(keyString);
-									Log(opcode, $"String table entry: {{ tableid: \"{tableIdString}\", key: \"{keyString}\" }}");
+									ReadObject(ref offset); // String Table asset (if any)
+									string tableIdString = ReadString(ref offset); values.Add(tableIdString);
+									string keyString = ReadString(ref offset); values.Add(keyString);
+									Log(opOffset, opcode, $"String table entry: {{ tableid: \"{tableIdString}\", key: \"{keyString}\" }}");
 								}
 								break;
 
@@ -557,51 +561,51 @@ namespace IcarusDataMiner
 					}
 				case EExprToken.PropertyConst:
 					{
-						MemberReference? pointer = ReadPointer();
-						Log(opcode, pointer?.ToString() ?? "null");
-						operations.Add(new Operation<MemberReference?>(opcode, pointer));
+						FieldReference? field = ReadField(ref offset);
+						Log(opOffset, opcode, field?.ToString() ?? "null");
+						operations.Add(new Operation<FieldReference?>(opcode, field));
 						break;
 					}
 				case EExprToken.ObjectConst:
 					{
-						FObjectResource pointer = ReadResource();
-						Log(opcode, pointer.ObjectName.Text);
-						operations.Add(new Operation<FObjectResource>(opcode, pointer));
+						FObjectResource obj = ReadObject(ref offset);
+						Log(opOffset, opcode, obj.ObjectName.Text);
+						operations.Add(new Operation<FObjectResource>(opcode, obj));
 						break;
 					}
 				case EExprToken.SoftObjectConst:
 				case EExprToken.FieldPathConst:
 					{
-						Log(opcode);
+						Log(opOffset, opcode);
 						List<Operation> childOperations = new(1);
-						ProcessExpr(childOperations);
+						ProcessExpr(childOperations, ref offset);
 						operations.Add(new Operation(opcode, childOperations));
 						break;
 					}
 				case EExprToken.NameConst:
 					{
-						string? constValue = ReadName();
-						Log(opcode, constValue);
+						string? constValue = ReadName(ref offset);
+						Log(opOffset, opcode, constValue);
 						operations.Add(new Operation<string?>(opcode, constValue));
 						break;
 					}
 				case EExprToken.RotationConst:
 					{
-						float pitch = mReader.ReadSingle();
-						float yaw = mReader.ReadSingle();
-						float roll = mReader.ReadSingle();
+						float pitch = ReadSingle(ref offset);
+						float yaw = ReadSingle(ref offset);
+						float roll = ReadSingle(ref offset);
 
-						Log(opcode, $"Pitch={pitch:0.0###}, Yaw={yaw:0.0###}, Roll={roll:0.0###}");
+						Log(opOffset, opcode, $"Pitch={pitch:0.0###}, Yaw={yaw:0.0###}, Roll={roll:0.0###}");
 						operations.Add(new Operation<FRotator>(opcode, new FRotator(pitch, yaw, roll)));
 						break;
 					}
 				case EExprToken.VectorConst:
 					{
-						float x = mReader.ReadSingle();
-						float y = mReader.ReadSingle();
-						float z = mReader.ReadSingle();
+						float x = ReadSingle(ref offset);
+						float y = ReadSingle(ref offset);
+						float z = ReadSingle(ref offset);
 
-						Log(opcode, $"X={x:0.0###}, Y={y:0.0###}, Z={z:0.0###}");
+						Log(opOffset, opcode, $"X={x:0.0###}, Y={y:0.0###}, Z={z:0.0###}");
 						operations.Add(new Operation<FVector>(opcode, new FVector(x, y, z)));
 						break;
 					}
@@ -611,37 +615,37 @@ namespace IcarusDataMiner
 						{
 							Rotation = new()
 							{
-								X = mReader.ReadSingle(),
-								Y = mReader.ReadSingle(),
-								Z = mReader.ReadSingle(),
-								W = mReader.ReadSingle()
+								X = ReadSingle(ref offset),
+								Y = ReadSingle(ref offset),
+								Z = ReadSingle(ref offset),
+								W = ReadSingle(ref offset)
 							},
 							Translation = new()
 							{
-								X = mReader.ReadSingle(),
-								Y = mReader.ReadSingle(),
-								Z = mReader.ReadSingle()
+								X = ReadSingle(ref offset),
+								Y = ReadSingle(ref offset),
+								Z = ReadSingle(ref offset)
 							},
 							Scale = new()
 							{
-								X = mReader.ReadSingle(),
-								Y = mReader.ReadSingle(),
-								Z = mReader.ReadSingle()
+								X = ReadSingle(ref offset),
+								Y = ReadSingle(ref offset),
+								Z = ReadSingle(ref offset)
 							}
 						};
 
-						Log(opcode, matrix.ToString());
+						Log(opOffset, opcode, matrix.ToString());
 						operations.Add(new Operation<ScriptMatrix>(opcode, matrix));
 						break;
 					}
 				case EExprToken.StructConst:
 					{
-						FObjectResource structObj = ReadResource();
-						int serializedSize = mReader.ReadInt32();
-						Log(opcode, $"{structObj.ObjectName.Text} (serialized size: {serializedSize})");
+						FObjectResource structObj = ReadObject(ref offset);
+						int serializedSize = ReadInt32(ref offset);
+						Log(opOffset, opcode, $"{structObj.ObjectName.Text} (serialized size: {serializedSize})");
 
 						List<Operation> childOperations = new();
-						while (ProcessExpr(childOperations) != EExprToken.EndStructConst)
+						while (ProcessExpr(childOperations, ref offset) != EExprToken.EndStructConst)
 						{
 							// struct contents
 						}
@@ -651,12 +655,14 @@ namespace IcarusDataMiner
 					}
 				case EExprToken.SetArray:
 					{
-						Log(opcode);
+						Log(opOffset, opcode);
+
+						// As of VER_UE4_CHANGE_SETARRAY_BYTECODE. Prior versions have an FProperty here instead of an expression
 						List<Operation> arrayExpr = new(1);
-						ProcessExpr(arrayExpr);
+						ProcessExpr(arrayExpr, ref offset);
 
 						List<Operation> childOperations = new();
-						while (ProcessExpr(childOperations) != EExprToken.EndArray)
+						while (ProcessExpr(childOperations, ref offset) != EExprToken.EndArray)
 						{
 							// Array contents
 						}
@@ -666,13 +672,13 @@ namespace IcarusDataMiner
 					}
 				case EExprToken.ArrayConst:
 					{
-						MemberReference? innerPropName = ReadPointer();
-						int num = mReader.ReadInt32();
+						FieldReference? innerPropName = ReadField(ref offset);
+						int num = ReadInt32(ref offset);
 
-						Log(opcode, $"Type: {innerPropName}, Count: {null}");
+						Log(opOffset, opcode, $"Type: {innerPropName}, Count: {null}");
 
 						List<Operation> childOperations = new();
-						while (ProcessExpr(childOperations) != EExprToken.EndArrayConst)
+						while (ProcessExpr(childOperations, ref offset) != EExprToken.EndArrayConst)
 						{
 							// Array contents
 						}
@@ -683,19 +689,19 @@ namespace IcarusDataMiner
 				case EExprToken.ByteConst:
 				case EExprToken.IntConstByte:
 					{
-						byte constValue = mReader.ReadByte();
-						Log(opcode, constValue.ToString());
+						byte constValue = ReadByte(ref offset);
+						Log(opOffset, opcode, constValue.ToString());
 						operations.Add(new Operation<byte?>(opcode, constValue));
 						break;
 					}
 				case EExprToken.MetaCast:
 				case EExprToken.DynamicCast:
 					{
-						FObjectResource classObj = ReadResource();
-						Log(opcode, $"Cast to {classObj.ObjectName.Text} of expr:");
+						FObjectResource classObj = ReadObject(ref offset);
+						Log(opOffset, opcode, $"Cast to {classObj.ObjectName.Text} of expr:");
 
 						List<Operation> childOperations = new(1);
-						ProcessExpr(childOperations);
+						ProcessExpr(childOperations, ref offset);
 
 						operations.Add(new Operation<FObjectResource>(opcode, classObj, childOperations));
 						break;
@@ -703,37 +709,37 @@ namespace IcarusDataMiner
 				case EExprToken.JumpIfNot:
 					{
 						// Code offset.
-						int skipCount = mReader.ReadInt32();
+						int skipCount = ReadInt32(ref offset);
 
-						Log(opcode, $"Offset: 0x{skipCount:X}, Condition:");
+						Log(opOffset, opcode, $"Offset: 0x{skipCount:X}, Condition:");
 
 						// Boolean expr.
 						List<Operation> childOperations = new(1);
-						ProcessExpr(childOperations);
+						ProcessExpr(childOperations, ref offset);
 
 						operations.Add(new Operation<int>(opcode, skipCount, childOperations));
 						break;
 					}
 				case EExprToken.Assert:
 					{
-						ushort lineNumber = mReader.ReadUInt16();
-						byte inDebugMode = mReader.ReadByte();
+						ushort lineNumber = ReadUInt16(ref offset);
+						byte inDebugMode = ReadByte(ref offset);
 
-						Log(opcode, $"Line {lineNumber}, in debug mode = {inDebugMode != 0} with expr:");
+						Log(opOffset, opcode, $"Line {lineNumber}, in debug mode = {inDebugMode != 0} with expr:");
 						List<Operation> childOperations = new(1);
-						ProcessExpr(childOperations); // Assert expr.
+						ProcessExpr(childOperations, ref offset); // Assert expr.
 
 						operations.Add(new Operation<AssertOperand>(opcode, new AssertOperand(lineNumber, inDebugMode), childOperations));
 						break;
 					}
 				case EExprToken.Skip:
 					{
-						int skipCount = mReader.ReadInt32();
-						Log(opcode, $"Possibly skip 0x{skipCount:X} bytes of expr:");
+						int skipCount = ReadInt32(ref offset);
+						Log(opOffset, opcode, $"Possibly skip {skipCount} bytes of expr:");
 
 						// Expression to possibly skip.
 						List<Operation> childOperations = new(1);
-						ProcessExpr(childOperations);
+						ProcessExpr(childOperations, ref offset);
 
 						operations.Add(new Operation<int>(opcode, skipCount, childOperations));
 						break;
@@ -741,9 +747,9 @@ namespace IcarusDataMiner
 				case EExprToken.InstanceDelegate:
 					{
 						// the name of the function assigned to the delegate.
-						string? funcName = ReadName();
+						string? funcName = ReadName(ref offset);
 
-						Log(opcode, funcName);
+						Log(opOffset, opcode, funcName);
 
 						operations.Add(new Operation<string?>(opcode, funcName));
 						break;
@@ -751,21 +757,21 @@ namespace IcarusDataMiner
 				case EExprToken.AddMulticastDelegate:
 				case EExprToken.RemoveMulticastDelegate:
 					{
-						Log(opcode);
+						Log(opOffset, opcode);
 
 						List<Operation> childOperations = new(2);
-						ProcessExpr(childOperations);
-						ProcessExpr(childOperations);
+						ProcessExpr(childOperations, ref offset);
+						ProcessExpr(childOperations, ref offset);
 
 						operations.Add(new Operation(opcode, childOperations));
 						break;
 					}
 				case EExprToken.ClearMulticastDelegate:
 					{
-						Log(opcode);
+						Log(opOffset, opcode);
 
 						List<Operation> childOperations = new(1);
-						ProcessExpr(childOperations);
+						ProcessExpr(childOperations, ref offset);
 
 						operations.Add(new Operation(opcode, childOperations));
 						break;
@@ -773,19 +779,19 @@ namespace IcarusDataMiner
 				case EExprToken.BindDelegate:
 					{
 						// the name of the function assigned to the delegate.
-						string? funcName = ReadName();
+						string? funcName = ReadName(ref offset);
 
-						Log(opcode, funcName);
+						Log(opOffset, opcode, funcName);
 
 						++mIndentLevel;
 
 						List<Operation> childOperations = new(2);
 
 						Log("Delegate:");
-						ProcessExpr(childOperations);
+						ProcessExpr(childOperations, ref offset);
 
 						Log("Object:");
-						ProcessExpr(childOperations);
+						ProcessExpr(childOperations, ref offset);
 
 						--mIndentLevel;
 
@@ -794,24 +800,24 @@ namespace IcarusDataMiner
 					}
 				case EExprToken.PushExecutionFlow:
 					{
-						int skipCount = mReader.ReadInt32();
-						Log(opcode, $"FlowStack.Push(0x{skipCount:X})");
+						int skipCount = ReadInt32(ref offset);
+						Log(opOffset, opcode, $"FlowStack.Push(0x{skipCount:X})");
 						operations.Add(new Operation<int>(opcode, skipCount));
 						break;
 					}
 				case EExprToken.PopExecutionFlow:
 					{
-						Log(opcode, "Jump to statement at FlowStack.Pop()");
+						Log(opOffset, opcode, "Jump to statement at FlowStack.Pop()");
 						operations.Add(new Operation(opcode));
 						break;
 					}
 				case EExprToken.PopExecutionFlowIfNot:
 					{
-						Log(opcode, "Jump to statement at FlowStack.Pop(). Condition:");
+						Log(opOffset, opcode, "Jump to statement at FlowStack.Pop(). Condition:");
 
 						// Boolean expr.
 						List<Operation> childOperations = new(1);
-						ProcessExpr(childOperations);
+						ProcessExpr(childOperations, ref offset);
 
 						operations.Add(new Operation(opcode, childOperations));
 						break;
@@ -820,53 +826,59 @@ namespace IcarusDataMiner
 				case EExprToken.WireTracepoint:
 				case EExprToken.Tracepoint:
 					{
-						Log(opcode);
+						Log(opOffset, opcode);
 						operations.Add(new Operation(opcode));
 						break;
 					}
 				case EExprToken.InstrumentationEvent:
 					{
-						EScriptInstrumentation eventType = (EScriptInstrumentation)mReader.ReadByte();
-						Log(opcode, eventType.ToString());
+						EScriptInstrumentation eventType = (EScriptInstrumentation)ReadByte(ref offset);
+						if (eventType == EScriptInstrumentation.InlineEvent)
+						{
+							offset += 12; // event name, not serialized
+						}
+						++offset; // There is always a byte skipped here when executing this code
+
+						Log(opOffset, opcode, eventType.ToString());
 						operations.Add(new Operation<EScriptInstrumentation>(opcode, eventType));
 						break;
 					}
 				case EExprToken.SwitchValue:
 					{
-						ushort numCases = mReader.ReadUInt16();
-						int afterSkip = mReader.ReadInt32();
+						ushort numCases = ReadUInt16(ref offset);
+						int afterOffset = ReadInt32(ref offset);
 
-						Log(opcode, $"{numCases} cases, end in 0x{afterSkip:X}");
+						Log(opOffset, opcode, $"{numCases} cases, end at 0x{afterOffset:X}");
 
 						++mIndentLevel;
 
 						Log("Index:");
 						List<Operation> indexOperation = new(1);
-						ProcessExpr(indexOperation);
+						ProcessExpr(indexOperation, ref offset);
 
 						SwitchOperand.Case[] cases = new SwitchOperand.Case[numCases];
 						for (ushort caseIndex = 0; caseIndex < numCases; ++caseIndex)
 						{
 							Log($"Case {caseIndex}:");
 							List<Operation> caseIndexOperation = new(1);
-							ProcessExpr(caseIndexOperation); // case index value term
+							ProcessExpr(caseIndexOperation, ref offset); // case index value term
 
 							++mIndentLevel;
 
-							int offsetToNextCase = mReader.ReadInt32();
-							Log($"Offset to the next case: 0x{offsetToNextCase}");
-							Log("Case Result:");
+							int offsetToNextCase = ReadInt32(ref offset);
+							Log($"Offset of next case: 0x{offsetToNextCase}");
+							Log("Case Term:");
 							List<Operation> caseIResultOperation = new(1);
-							ProcessExpr(caseIResultOperation); // case term
+							ProcessExpr(caseIResultOperation, ref offset); // case term
 
 							--mIndentLevel;
 
 							cases[caseIndex] = new SwitchOperand.Case(caseIndexOperation[0], caseIResultOperation[0], offsetToNextCase);
 						}
 
-						Log($"Default result:");
+						Log($"Default term:");
 						List<Operation> defaultOperation = new(1);
-						ProcessExpr(defaultOperation);
+						ProcessExpr(defaultOperation, ref offset);
 
 						--mIndentLevel;
 
@@ -875,13 +887,13 @@ namespace IcarusDataMiner
 					}
 				case EExprToken.ArrayGetByRef:
 					{
-						Log(opcode);
+						Log(opOffset, opcode);
 
 						++mIndentLevel;
 
 						List<Operation> childOperations = new(2);
-						ProcessExpr(childOperations);
-						ProcessExpr(childOperations);
+						ProcessExpr(childOperations, ref offset);
+						ProcessExpr(childOperations, ref offset);
 
 						--mIndentLevel;
 
@@ -896,9 +908,9 @@ namespace IcarusDataMiner
 			return opcode;
 		}
 
-		private void Log(EExprToken opcode)
+		private void Log(int offset, EExprToken opcode)
 		{
-			mWriter.WriteLine($"{mStream.Position:X8}  {new string(' ', mIndentLevel * 2)}[{(int)opcode:X2}] {opcode}");
+			mWriter.WriteLine($"{offset:X8}  {new string(' ', mIndentLevel * 2)}[{(int)opcode:X2}] {opcode}");
 		}
 
 		private void Log(string? message)
@@ -906,40 +918,67 @@ namespace IcarusDataMiner
 			mWriter.WriteLine($"          {new string(' ', mIndentLevel * 2)}{message}");
 		}
 
-		private void Log(EExprToken opcode, string? message)
+		private void Log(int offset, EExprToken opcode, string? message)
 		{
-			mWriter.WriteLine($"{mStream.Position:X8}  {new string(' ', mIndentLevel * 2)}[{(int)opcode:X2}] {opcode}: {message}");
+			mWriter.WriteLine($"{offset:X8}  {new string(' ', mIndentLevel * 2)}[{(int)opcode:X2}] {opcode}: {message}");
 		}
 
-		private MemberReference? ReadPointer()
+		private byte ReadByte(ref int offset)
 		{
-			int pointerValue = mReader.ReadInt32();
-			switch (pointerValue)
+			++offset;
+			return mReader.ReadByte();
+		}
+
+		private ushort ReadUInt16(ref int offset)
+		{
+			offset += 2;
+			return mReader.ReadUInt16();
+		}
+
+		private int ReadInt32(ref int offset)
+		{
+			offset += 4;
+			return mReader.ReadInt32();
+		}
+
+		private long ReadInt64(ref int offset)
+		{
+			offset += 8;
+			return mReader.ReadInt64();
+		}
+
+		private ulong ReadUInt64(ref int offset)
+		{
+			offset += 8;
+			return mReader.ReadUInt64();
+		}
+
+		private float ReadSingle(ref int offset)
+		{
+			offset += 4;
+			return mReader.ReadSingle();
+		}
+
+		private FieldReference? ReadField(ref int offset)
+		{
+			offset += 8;
+
+			// Reference: FieldPath.cpp operator<< called from PropertyProxyArchive.h
+
+			int pathCount = mReader.ReadInt32();
+			string?[] path = new string[pathCount];
+			int temp = 0;
+			for (int i = 0; i < pathCount; ++i)
 			{
-				case 0:
-					if (mReader.ReadInt32() != 0) throw new NotImplementedException("Unrecognized value.");
-					return null;
-				case 1:
-				case 2:
-					{
-						// Note: Order of name and struct type could be wrong here. In cases seen so far, the values are the same.
-						// Also, struct type is only a guess at what the second value is. I could not find serialization code in
-						// the engine which matches what is seen here.
-						string? name = ReadName();
-						string? structType = pointerValue == 2 ? ReadName() : null;
-						int resourceIndex = mReader.ReadInt32();
-						FObjectResource resource = (resourceIndex >= 0)
-							? mPackage.ExportMap[resourceIndex]
-							: mPackage.ImportMap[~resourceIndex];
-						return new MemberReference(name, resource);
-					}
-				default:
-					throw new InvalidOperationException("Reader is not positioned on a name");
+				path[i] = ReadName(ref temp);
 			}
+			FObjectResource owner = ReadObjectInternal();
+			return new FieldReference(path, owner);
 		}
 
-		private string? ReadName()
+		private string? ReadName(ref int offset)
 		{
+			offset += 12;
 			int nameIndex = mReader.ReadInt32();
 			int number = mReader.ReadInt32();
 
@@ -949,42 +988,50 @@ namespace IcarusDataMiner
 			return $"{name}_{number - 1}";
 		}
 
-		private string ReadString()
+		private string ReadString(ref int offset)
 		{
-			EExprToken opcode = (EExprToken)mReader.ReadByte();
+			EExprToken opcode = (EExprToken)ReadByte(ref offset);
 
 			switch (opcode)
 			{
 				case EExprToken.StringConst:
-					return ReadAsciiString();
+					return ReadAsciiString(ref offset);
 				case EExprToken.UnicodeStringConst:
-					return ReadUnicodeString();
+					return ReadUnicodeString(ref offset);
 				default:
 					throw new FormatException($"Expected op code StringConst or UnicodeStringConst, found {opcode}");
 			}
 		}
 
-		private string ReadAsciiString()
+		private string ReadAsciiString(ref int offset)
 		{
-			StringBuilder builder = new StringBuilder();
+			StringBuilder builder = new();
 			for (byte c = mReader.ReadByte(); c != 0; c = mReader.ReadByte())
 			{
 				builder.Append((char)c);
 			}
+			offset += builder.Length + 1;
 			return builder.ToString();
 		}
 
-		private string ReadUnicodeString()
+		private string ReadUnicodeString(ref int offset)
 		{
-			StringBuilder builder = new StringBuilder();
+			StringBuilder builder = new();
 			for (ushort c = mReader.ReadUInt16(); c != 0; c = mReader.ReadUInt16())
 			{
 				builder.Append((char)c);
 			}
+			offset += (builder.Length + 1) * 2;
 			return builder.ToString();
 		}
 
-		private FObjectResource ReadResource()
+		private FObjectResource ReadObject(ref int offset)
+		{
+			offset += 8;
+			return ReadObjectInternal();
+		}
+
+		private FObjectResource ReadObjectInternal()
 		{
 			int index = mReader.ReadInt32();
 			if (index < 0) return mPackage.ImportMap[~index];
@@ -1229,11 +1276,11 @@ namespace IcarusDataMiner
 
 	internal class MapOperand
 	{
-		public MemberReference? Key { get; }
+		public FieldReference? Key { get; }
 
-		public MemberReference? Value { get; }
+		public FieldReference? Value { get; }
 
-		public MapOperand(MemberReference? key, MemberReference? value)
+		public MapOperand(FieldReference? key, FieldReference? value)
 		{
 			Key = key;
 			Value = value;
@@ -1250,9 +1297,9 @@ namespace IcarusDataMiner
 
 		public int SkipCount { get; }
 
-		public MemberReference? RValue { get; }
+		public FieldReference? RValue { get; }
 
-		public ContextOperand(Operation objectExpression, Operation contextExpression, bool canFailSilently, int skipCount, MemberReference? rValue)
+		public ContextOperand(Operation objectExpression, Operation contextExpression, bool canFailSilently, int skipCount, FieldReference? rValue)
 		{
 			ObjectExpression = objectExpression;
 			ContextExpression = contextExpression;
@@ -1290,11 +1337,11 @@ namespace IcarusDataMiner
 
 	internal class ArrayOperand
 	{
-		public MemberReference? Type { get; }
+		public FieldReference? Type { get; }
 
 		public int Count { get; }
 
-		public ArrayOperand(MemberReference? type, int count)
+		public ArrayOperand(FieldReference? type, int count)
 		{
 			Type = type;
 			Count = count;
@@ -1360,22 +1407,22 @@ namespace IcarusDataMiner
 		}
 	}
 
-	internal class MemberReference
+	internal class FieldReference
 	{
-		public string? MemberName { get; }
+		public string? Path { get; }
 
-		public FObjectResource ObjectResource { get; }
+		public FObjectResource Owner { get; }
 
-		public MemberReference(string? memberName, FObjectResource objectResource)
+		public FieldReference(IEnumerable<string?> path, FObjectResource owner)
 		{
-			MemberName = memberName;
-			ObjectResource = objectResource;
+			Path = string.Join(".", path);
+			Owner = owner;
 		}
 
 		public override string ToString()
 		{
-			if (MemberName == null) return ObjectResource.ObjectName.Text;
-			return $"{ObjectResource.ObjectName.Text}::{MemberName}";
+			if (Path == null) return Owner.ObjectName.Text;
+			return Path;
 		}
 	}
 
