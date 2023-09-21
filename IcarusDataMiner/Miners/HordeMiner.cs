@@ -689,8 +689,8 @@ namespace IcarusDataMiner.Miners
 										continue;
 									}
 
-									Operation<MemberReference?> intParam = (Operation<MemberReference?>)expression.ChildOperations[0];
-									if (!(intParam.Operand?.MemberName?.Equals("Completions") ?? false))
+									Operation<FieldReference?> intParam = (Operation<FieldReference?>)expression.ChildOperations[0];
+									if (!(intParam.Operand?.Path?.Equals("Completions") ?? false))
 									{
 										continue;
 									}
@@ -720,7 +720,7 @@ namespace IcarusDataMiner.Miners
 
 											if (op.ChildOperations[1].OpCode == EExprToken.FloatConst)
 											{
-												string? varName = ((Operation<MemberReference?>)op.ChildOperations[0]).Operand?.MemberName;
+												string? varName = ((Operation<FieldReference?>)op.ChildOperations[0]).Operand?.Path;
 												if (varName == null) continue;
 												floatVars[varName] = ((Operation<float>)op.ChildOperations[1]).Operand;
 												continue;
@@ -733,7 +733,7 @@ namespace IcarusDataMiner.Miners
 													expression.ChildOperations[0].OpCode == EExprToken.LocalVariable &&
 													expression.ChildOperations[1].OpCode == EExprToken.SwitchValue)
 												{
-													string? varName = ((Operation<MemberReference?>)op.ChildOperations[0]).Operand?.MemberName;
+													string? varName = ((Operation<FieldReference?>)op.ChildOperations[0]).Operand?.Path;
 													if (varName == null) continue;
 
 													bool casesValid = true;
@@ -741,7 +741,7 @@ namespace IcarusDataMiner.Miners
 													float[] switchResults = new float[switchOperand.Cases.Count];
 													for (int i = 0; i < switchOperand.Cases.Count; ++i)
 													{
-														Operation<MemberReference?>? resultOp = switchOperand.Cases[i].Result as Operation<MemberReference?>;
+														Operation<FieldReference?>? resultOp = switchOperand.Cases[i].Result as Operation<FieldReference?>;
 														if (resultOp == null || resultOp.Operand == null)
 														{
 															casesValid = false;
@@ -749,7 +749,7 @@ namespace IcarusDataMiner.Miners
 														}
 
 														float switchResult;
-														if (!floatVars.TryGetValue(resultOp.Operand.MemberName!, out switchResult))
+														if (!floatVars.TryGetValue(resultOp.Operand.Path!, out switchResult))
 														{
 															throw new DataMinerException($"Expected to find a local float variable named {resultOp.Operand}");
 														}
@@ -764,7 +764,7 @@ namespace IcarusDataMiner.Miners
 												else if (expression.Operand?.Equals("InventoryItemLibrary::GenerateRewardStackSize") ?? false &&
 													expression.ChildOperations[2].OpCode == EExprToken.LocalVariable)
 												{
-													string varName = ((Operation<MemberReference?>)expression.ChildOperations[2]).Operand!.MemberName!;
+													string varName = ((Operation<FieldReference?>)expression.ChildOperations[2]).Operand!.Path!;
 													rewardsDifficultyMultipliers = switchResultVars[varName];
 													break;
 												}
@@ -811,7 +811,7 @@ namespace IcarusDataMiner.Miners
 
 								if (op.ChildOperations[1].OpCode == EExprToken.FloatConst)
 								{
-									string? varName = ((Operation<MemberReference?>)op.ChildOperations[0]).Operand?.MemberName;
+									string? varName = ((Operation<FieldReference?>)op.ChildOperations[0]).Operand?.Path;
 									if (varName == null) continue;
 									floatVars[varName] = ((Operation<float>)op.ChildOperations[1]).Operand;
 									continue;
@@ -824,7 +824,7 @@ namespace IcarusDataMiner.Miners
 										expression.ChildOperations[0].OpCode == EExprToken.LocalVariable &&
 										expression.ChildOperations[1].OpCode == EExprToken.SwitchValue)
 									{
-										string? varName = ((Operation<MemberReference?>)op.ChildOperations[0]).Operand?.MemberName;
+										string? varName = ((Operation<FieldReference?>)op.ChildOperations[0]).Operand?.Path;
 										if (varName == null) continue;
 
 										bool casesValid = true;
@@ -832,7 +832,7 @@ namespace IcarusDataMiner.Miners
 										float[] switchResults = new float[switchOperand.Cases.Count];
 										for (int i = 0; i < switchOperand.Cases.Count; ++i)
 										{
-											Operation<MemberReference?>? resultOp = switchOperand.Cases[i].Result as Operation<MemberReference?>;
+											Operation<FieldReference?>? resultOp = switchOperand.Cases[i].Result as Operation<FieldReference?>;
 											if (resultOp == null || resultOp.Operand == null)
 											{
 												casesValid = false;
@@ -840,7 +840,7 @@ namespace IcarusDataMiner.Miners
 											}
 
 											float switchResult;
-											if (!floatVars.TryGetValue(resultOp.Operand.MemberName!, out switchResult))
+											if (!floatVars.TryGetValue(resultOp.Operand.Path!, out switchResult))
 											{
 												throw new DataMinerException($"Expected to find a local float variable named {resultOp.Operand}");
 											}
@@ -855,7 +855,7 @@ namespace IcarusDataMiner.Miners
 									else if (expression.Operand?.Equals("KismetMathLibrary::FCeil") ?? false &&
 										expression.ChildOperations[2].OpCode == EExprToken.LocalVariable)
 									{
-										string varName = ((Operation<MemberReference?>)expression.ChildOperations[0]).Operand!.MemberName!;
+										string varName = ((Operation<FieldReference?>)expression.ChildOperations[0]).Operand!.Path!;
 										creaturesDifficultyMultipliers = switchResultVars[varName];
 										break;
 									}

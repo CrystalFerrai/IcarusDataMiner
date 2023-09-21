@@ -111,7 +111,7 @@ namespace IcarusDataMiner
 		private WorldDataUtil? LoadWorldData()
 		{
 			GameFile file = mDataProvider.Files["World/D_WorldData.json"];
-			return (WorldDataUtil?)JsonConvert.DeserializeObject(Encoding.UTF8.GetString(file.Read()), typeof(WorldDataUtil), new FVector2DJsonConverter());
+			return (WorldDataUtil?)JsonConvert.DeserializeObject(Encoding.UTF8.GetString(file.Read()), typeof(WorldDataUtil), new FVector2DJsonConverter(), new FVectorJsonConverter());
 		}
 	}
 }

@@ -58,7 +58,7 @@ namespace IcarusDataMiner.Miners
 			if (worldData.Name == null) return null;
 			if (worldData.MinimapData == null) return null;
 
-			IReadOnlyList<string> texturePaths = worldData.MinimapData.MapTextures;
+			IList<string> texturePaths = worldData.MinimapData.MapTextures;
 			if (texturePaths.Count == 0) return null;
 
 			List<Tile> tiles = new();

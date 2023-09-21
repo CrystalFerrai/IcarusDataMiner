@@ -113,6 +113,17 @@ namespace IcarusDataMiner
 		}
 
 		/// <summary>
+		/// Add "Colored Shape" locations to the overlay
+		/// </summary>
+		/// <param name="locations">Locations to add</param>
+		/// <param name="textSize">Font size for rendering text locations</param>
+		/// <param name="color">The color to use for the locations</param>
+		public void AddLocations(IEnumerable<MapLocation> locations, float textSize, SKColor color)
+		{
+			mLocationCollections.Add(new LocationCollection(locations, color, null, MarkerShape.None, textSize));
+		}
+
+		/// <summary>
 		/// Clears all added locations. Typically called after DrawOverlay if you want to re-use the
 		/// same instance to draw a new overlay for the same map.
 		/// </summary>
@@ -186,9 +197,11 @@ namespace IcarusDataMiner
 							IsAntialias = true,
 							Style = SKPaintStyle.Fill,
 							Typeface = sTextTypeFace,
-							TextSize = (float)Math.Round(sTextSize * sizeScale, MidpointRounding.AwayFromZero),
+							TextSize = (float)Math.Round(collection.TextSize * sizeScale, MidpointRounding.AwayFromZero),
 							TextAlign = SKTextAlign.Center
 						};
+
+						SKPoint textPos = new(0.0f, textPaint.TextSize * 0.5f);
 
 						foreach (MapLocation location in collection.Locations)
 						{
@@ -205,7 +218,12 @@ namespace IcarusDataMiner
 
 							if (location is TextMapLocation textLocation)
 							{
-								canvas.DrawText(textLocation.Text, SKPoint.Empty, textPaint);
+								canvas.DrawText(textLocation.Text, textPos, textPaint);
+							}
+							else if (location is AreaMapLocation areaLocation)
+							{
+								float radius = areaLocation.Radius * mWorldToMapX;
+								canvas.DrawCircle(SKPoint.Empty, radius, paint);
 							}
 							else
 							{
@@ -261,20 +279,28 @@ namespace IcarusDataMiner
 
 		private class LocationCollection
 		{
-			public List<MapLocation> Locations;
+			public List<MapLocation> Locations { get; }
 
-			public SKColor Color;
+			public SKColor Color { get; }
 
-			public SKImage? Icon;
+			public SKImage? Icon { get; }
 
-			public MarkerShape Shape;
+			public MarkerShape Shape { get; }
+
+			public float TextSize { get; }
 
 			public LocationCollection(IEnumerable<MapLocation> locations, SKColor color, SKImage? icon, MarkerShape shape)
+				: this(locations, color, icon, shape, sTextSize)
+			{
+			}
+
+			public LocationCollection(IEnumerable<MapLocation> locations, SKColor color, SKImage? icon, MarkerShape shape, float textSize)
 			{
 				Locations = new(locations);
 				Color = color;
 				Icon = icon;
 				Shape = shape;
+				TextSize = textSize;
 			}
 		}
 	}
@@ -343,6 +369,23 @@ namespace IcarusDataMiner
 			: base(position, size)
 		{
 			Text = text;
+		}
+	}
+
+	/// <summary>
+	/// A map location that represents a circular area
+	/// </summary>
+	internal class AreaMapLocation : MapLocation
+	{
+		/// <summary>
+		/// The radius of the location, in world space
+		/// </summary>
+		public float Radius { get; }
+
+		public AreaMapLocation(FVector center, float radius)
+			: base(center)
+		{
+			Radius = radius;
 		}
 	}
 

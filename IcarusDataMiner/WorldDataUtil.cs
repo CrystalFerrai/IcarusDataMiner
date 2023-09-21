@@ -50,7 +50,7 @@ namespace IcarusDataMiner
 
 		public WorldData Defaults { get; set; }
 
-		public List<WorldData> Rows { get; }
+		public IList<WorldData> Rows { get; }
 
 		public WorldDataUtil(string rowStruct, WorldData defaults)
 		{
@@ -80,19 +80,21 @@ namespace IcarusDataMiner
 
 		public string? DeveloperNotesLevel { get; set; }
 
-		public List<string> HeightmapLevels { get; } = new List<string>();
+		public IList<string> HeightmapLevels { get; } = new List<string>();
 
-		public List<string> GeneratedLevels { get; } = new List<string>();
+		public IList<string> GeneratedLevels { get; } = new List<string>();
 
 		public string? GeneratedVistaLevel { get; set; }
 
-		public List<string> DeveloperLevels { get; } = new List<string>();
+		public IList<string> DeveloperLevels { get; } = new List<string>();
 
-		public List<FBoxSphereBounds> GridBounds { get; } = new List<FBoxSphereBounds>();
+		public IList<FBoxSphereBounds> GridBounds { get; } = new List<FBoxSphereBounds>();
 
-		public List<WorldCollection> WorldCollections { get; } = new List<WorldCollection>();
+		public IList<WorldCollection> WorldCollections { get; } = new List<WorldCollection>();
 
 		public MinimapData? MinimapData { get; set; }
+
+		public IDictionary<string, DropGroup> DropGroups { get; } = new Dictionary<string, DropGroup>();
 
 		public string GetGridCell(FVector location)
 		{
@@ -103,6 +105,11 @@ namespace IcarusDataMiner
 
 			return $"{(char)('A' + X)}{Y + 1}";
 		}
+
+		public override string? ToString()
+		{
+			return Name;
+		}
 	}
 
 	/// <summary>
@@ -112,9 +119,14 @@ namespace IcarusDataMiner
 	{
 		public string? CollectionName { get; set; }
 
-		public List<string> HeightmapLevels { get; } = new List<string>();
+		public IList<string> HeightmapLevels { get; } = new List<string>();
 
 		public string? DeveloperLevel { get; set; }
+
+		public override string? ToString()
+		{
+			return CollectionName;
+		}
 	}
 
 	/// <summary>
@@ -122,12 +134,27 @@ namespace IcarusDataMiner
 	/// </summary>
 	internal class MinimapData
 	{
-		public List<string> MapTextures { get; } = new List<string>();
+		public IList<string> MapTextures { get; } = new List<string>();
 
-		public List<string> HeightMapTextures { get; } = new List<string>();
+		public IList<string> HeightMapTextures { get; } = new List<string>();
 
 		public FVector2D WorldBoundaryMin { get; set; }
 
 		public FVector2D WorldBoundaryMax { get; set; }
+	}
+
+	/// <summary>
+	/// 
+	/// </summary>
+	internal class DropGroup
+	{
+		public IList<FVector> Locations { get; } = new List<FVector>();
+
+		public string? GroupName { get; set; }
+
+		public override string? ToString()
+		{
+			return GroupName;
+		}
 	}
 }

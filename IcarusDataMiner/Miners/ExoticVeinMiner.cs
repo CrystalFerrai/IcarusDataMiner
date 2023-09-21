@@ -152,8 +152,6 @@ namespace IcarusDataMiner.Miners
 					}
 				}
 
-				if (node.NodeType != ExoticNodeType.Plant && node.SpawnIdentifier.Equals("None")) continue;
-
 				exoticNodes.Add(node);
 			}
 

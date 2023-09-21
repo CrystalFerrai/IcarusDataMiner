@@ -14,6 +14,7 @@
 
 using CUE4Parse.FileProvider;
 using CUE4Parse.UE4.Objects.Core.i18N;
+using CUE4Parse.UE4.Objects.Core.Math;
 using Newtonsoft.Json.Linq;
 using System.Diagnostics.CodeAnalysis;
 using System.Text;
@@ -25,6 +26,8 @@ namespace IcarusDataMiner
 	/// </summary>
 	internal class DataTables
 	{
+		public IcarusDataTable<FIcarusTerrain>? TerrainsTable { get; private set; }
+
 		public IcarusDataTable<FItemData>? ItemTemplateTable { get; private set; }
 
 		public IcarusDataTable<FItemStaticData>? ItemStaticTable { get; private set; }
@@ -46,6 +49,7 @@ namespace IcarusDataMiner
 		{
 			return new()
 			{
+				TerrainsTable = LoadDataTable<FIcarusTerrain>(provider, "Prospects/D_Terrains.json"),
 				ItemTemplateTable = LoadDataTable<FItemData>(provider, "Items/D_ItemTemplate.json"),
 				ItemStaticTable = LoadDataTable<FItemStaticData>(provider, "Items/D_ItemsStatic.json"),
 				ItemableTable = LoadDataTable<FItemableData>(provider, "Traits/D_Itemable.json"),
@@ -92,6 +96,22 @@ namespace IcarusDataMiner
 	}
 
 #pragma warning disable CS0649 // Field never assigned to
+
+	internal struct FIcarusTerrain : IDataTableRow
+	{
+		public string Name { get; set; }
+		public JObject? Metadata { get; set; }
+
+		public string TerrainName;
+		public ObjectPointer Level;
+		public ObjectPointer TemperatureMap;
+		public FVector2D TemperatureMapRange;
+		public ObjectPointer BiomeMap;
+		public ObjectPointer Bounds;
+		public FRowHandle SpawnConfig;
+		public FRowHandle FishConfig;
+		public ObjectPointer AudioZoneMap;
+	}
 
 	internal struct FWorkshopItem : IDataTableRow
 	{

@@ -75,6 +75,16 @@ namespace IcarusDataMiner
 				if (disposing)
 				{
 					// Dispose managed objects
+
+					foreach (IDataMiner miner in mMiners)
+					{
+						if (miner is IDisposable disposable)
+						{
+							disposable.Dispose();
+						}
+					}
+					mMiners.Clear();
+
 					mProviderManager.Dispose();
 				}
 
@@ -157,6 +167,10 @@ namespace IcarusDataMiner
 					{
 						includeMiners?.Remove(name);
 						mMiners.Add(miner);
+					}
+					else if (miner is IDisposable disposable)
+					{
+						disposable.Dispose();
 					}
 				}
 			}
