@@ -6,8 +6,18 @@ I use the output of this to update various Google sheets located in [this folder
 
 Run the program with no parameters to print the usage.
 ```
-IcarusDataMiner [game content directory] [output directory] [[optional comma separated list of miners to run, else all will run]]
+Usage: IcarusDataMiner [content dir] [output dir] [[miners]]
+
+  content dir   Path the the game's Content directory (Icarus/Content)
+
+  output dir    Path to directory where mined data will be output
+
+  miners        (Optional) Comma separated list of miners to run. If not
+                specified, all default miners will run. Specify 'all' to force
+                all miners to run.
 ```
+
+This will also print a list of the names of all available miners.
 
 ## Releases
 

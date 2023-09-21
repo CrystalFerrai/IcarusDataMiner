@@ -30,7 +30,10 @@ namespace IcarusDataMiner
 			"\n" +
 			"  miners        (Optional) Comma separated list of miners to run. If not\n" +
 			"                specified, all default miners will run. Specify 'all' to force\n" +
-			"                all miners to run.";
+			"                all miners to run.\n" +
+			"\n" +
+			"Default miners: {0}\n" +
+			"Additional miners: {1}";
 
 		/// <summary>
 		/// Program entry point
@@ -41,7 +44,11 @@ namespace IcarusDataMiner
 
 			if (args.Length < 2)
 			{
-				sLogger.Log(LogLevel.Important, UsageText);
+				List<string> defaultMiners, additionalMiners;
+				MineRunner.ListAllMiners(out defaultMiners, out additionalMiners);
+
+				string message = string.Format(UsageText, string.Join(',', defaultMiners), string.Join(',', additionalMiners));
+				sLogger.Log(LogLevel.Important, message);
 				return 0;
 			}
 

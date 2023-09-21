@@ -21,7 +21,7 @@ namespace IcarusDataMiner
 	/// <summary>
 	/// Locates, instantiates and runs data miners
 	/// </summary>
-	internal class MineRunner : IDisposable
+	internal sealed class MineRunner : IDisposable
 	{
 		private bool mIsDisposed;
 
@@ -124,6 +124,56 @@ namespace IcarusDataMiner
 				mLogger.Log(LogLevel.Information, $"[{miner.Name}] completed in {((double)timer.ElapsedTicks / (double)Stopwatch.Frequency * 1000.0):0.##}ms");
 			}
 			return success;
+		}
+
+		public static void ListAllMiners(out List<string> defaultMiners, out List<string> additionalMiners)
+		{
+			defaultMiners = new();
+			additionalMiners = new();
+
+			Type minerInterface = typeof(IDataMiner);
+
+			Assembly assembly = Assembly.GetExecutingAssembly();
+			foreach (Type type in assembly.GetTypes())
+			{
+				if (!type.IsAbstract && minerInterface.IsAssignableFrom(type))
+				{
+					DefaultEnabledAttribute? defaultEnabledAttribute = type.GetCustomAttribute<DefaultEnabledAttribute>();
+					bool isDefaultMiner = defaultEnabledAttribute?.IsEnabled ?? true;
+
+					IDataMiner? miner;
+					try
+					{
+						miner = (IDataMiner?)Activator.CreateInstance(type);
+						if (miner == null)
+						{
+							continue;
+						}
+					}
+					catch
+					{
+						continue;
+					}
+
+					string name = miner.Name;
+					if (isDefaultMiner)
+					{
+						defaultMiners.Add(name);
+					}
+					else
+					{
+						additionalMiners.Add(name);
+					}
+
+					if (miner is IDisposable disposable)
+					{
+						disposable.Dispose();
+					}
+				}
+			}
+
+			defaultMiners.Sort();
+			additionalMiners.Sort();
 		}
 
 		private void CreateMiners(IEnumerable<string>? minersToInclude)
