@@ -13,7 +13,6 @@
 // limitations under the License.
 
 using CUE4Parse.FileProvider;
-using CUE4Parse.UE4.Objects.Core.i18N;
 using CUE4Parse.UE4.Objects.Core.Math;
 using Newtonsoft.Json.Linq;
 using System.Diagnostics.CodeAnalysis;

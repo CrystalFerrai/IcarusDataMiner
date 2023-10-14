@@ -241,8 +241,8 @@ namespace IcarusDataMiner
 					}
 					else
 					{
-						int iconWidth = (int)Math.Round(collection.Icon.Width * (mWorldToMapX * MapScaleFactor));
-						int iconHeight = (int)Math.Round(collection.Icon.Height * (mWorldToMapY * MapScaleFactor));
+						int iconWidth = (int)Math.Round(collection.Icon.Width * (mWorldToMapX * MapScaleFactor) * 0.5f);
+						int iconHeight = (int)Math.Round(collection.Icon.Height * (mWorldToMapY * MapScaleFactor) * 0.5f);
 
 						float halfIconWidth = iconWidth * 0.5f;
 						float halfIconHeight = iconHeight * 0.5f;

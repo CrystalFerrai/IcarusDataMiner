@@ -349,53 +349,69 @@ namespace IcarusDataMiner.Miners
 			// Write custom caves
 			if (customCaves.Count > 0)
 			{
-				string outCustomPath = Path.Combine(config.OutputDirectory, Name, "Data", $"{mapAsset.NameWithoutExtension}_Custom.csv");
-				using (FileStream outStream = IOUtil.CreateFile(outCustomPath, logger))
-				using (StreamWriter writer = new StreamWriter(outStream))
+				// CSV
 				{
-					int maxEntranceCount = 0;
-					foreach (CaveData cave in customCaves)
+					string outCustomPath = Path.Combine(config.OutputDirectory, Name, "Data", $"{mapAsset.NameWithoutExtension}_Custom.csv");
+					using (FileStream outStream = IOUtil.CreateFile(outCustomPath, logger))
+					using (StreamWriter writer = new StreamWriter(outStream))
 					{
-						if (cave.Entrances.Count > maxEntranceCount) maxEntranceCount = cave.Entrances.Count;
-					}
-					int maxSpecCount = 0;
-					foreach (CaveData cave in customCaves)
-					{
-						if (cave.SpeculativeEntrances.Count > maxSpecCount) maxSpecCount = cave.SpeculativeEntrances.Count;
-					}
-
-					writer.Write("Quad,ID");
-					for (int i = 0; i < maxEntranceCount; ++i)
-					{
-						writer.Write($",Entrance {i} X,Entrance {i} Y,Entrance {i} Z,Entrance {i} R,Entrance {i} Grid");
-					}
-					for (int i = 0; i < maxSpecCount; ++i)
-					{
-						writer.Write($",Spec {i} X,Spec {i} Y,Spec {i} Z,Spec {i} R,Spec {i} Grid");
-					}
-					writer.WriteLine();
-
-					foreach (CaveData cave in customCaves)
-					{
-						writer.Write($"{cave.QuadName},{cave.ID}");
-						Action<int, IList<CaveEntranceData>> writeEntrances = (max, entrances) =>
+						int maxEntranceCount = 0;
+						foreach (CaveData cave in customCaves)
 						{
-							for (int i = 0; i < max; ++i)
-							{
-								if (i < entrances.Count)
-								{
-									CaveEntranceData entrance = entrances[i];
-									writer.Write($",{entrance.Location.Position.X},{entrance.Location.Position.Y},{entrance.Location.Position.Z},{entrance.Location.Rotation.Yaw},{worldData.GetGridCell(entrance.Location.Position)}");
-								}
-								else
-								{
-									writer.Write($",,,,,");
-								}
-							}
-						};
-						writeEntrances(maxEntranceCount, cave.Entrances);
-						writeEntrances(maxSpecCount, cave.SpeculativeEntrances);
+							if (cave.Entrances.Count > maxEntranceCount) maxEntranceCount = cave.Entrances.Count;
+						}
+						int maxSpecCount = 0;
+						foreach (CaveData cave in customCaves)
+						{
+							if (cave.SpeculativeEntrances.Count > maxSpecCount) maxSpecCount = cave.SpeculativeEntrances.Count;
+						}
+
+						writer.Write("Quad,ID");
+						for (int i = 0; i < maxEntranceCount; ++i)
+						{
+							writer.Write($",Entrance {i} X,Entrance {i} Y,Entrance {i} Z,Entrance {i} R,Entrance {i} Grid");
+						}
+						for (int i = 0; i < maxSpecCount; ++i)
+						{
+							writer.Write($",Spec {i} X,Spec {i} Y,Spec {i} Z,Spec {i} R,Spec {i} Grid");
+						}
 						writer.WriteLine();
+
+						foreach (CaveData cave in customCaves)
+						{
+							writer.Write($"{cave.QuadName},{cave.ID}");
+							Action<int, IList<CaveEntranceData>> writeEntrances = (max, entrances) =>
+							{
+								for (int i = 0; i < max; ++i)
+								{
+									if (i < entrances.Count)
+									{
+										CaveEntranceData entrance = entrances[i];
+										writer.Write($",{entrance.Location.Position.X},{entrance.Location.Position.Y},{entrance.Location.Position.Z},{entrance.Location.Rotation.Yaw},{worldData.GetGridCell(entrance.Location.Position)}");
+									}
+									else
+									{
+										writer.Write($",,,,,");
+									}
+								}
+							};
+							writeEntrances(maxEntranceCount, cave.Entrances);
+							writeEntrances(maxSpecCount, cave.SpeculativeEntrances);
+							writer.WriteLine();
+						}
+					}
+				}
+
+				// Image
+				{
+					MapOverlayBuilder mapBuilder = MapOverlayBuilder.Create(worldData, providerManager.AssetProvider);
+					mapBuilder.AddLocations(customCaves.SelectMany(c => c.Entrances.Select(e => new RotatedMapLocation(e.Location.Position, e.Location.Rotation.Yaw))), Resources.Icon_Cave);
+					SKData outData = mapBuilder.DrawOverlay();
+
+					string outPath = Path.Combine(config.OutputDirectory, Name, "Visual", $"{mapAsset.NameWithoutExtension}_Custom.png");
+					using (FileStream outStream = IOUtil.CreateFile(outPath, logger))
+					{
+						outData.SaveTo(outStream);
 					}
 				}
 			}
