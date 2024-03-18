@@ -13,7 +13,10 @@
 // limitations under the License.
 
 using CUE4Parse.FileProvider;
+using CUE4Parse.UE4.Assets.Exports.Texture;
+using CUE4Parse.UE4.Objects.Core.i18N;
 using CUE4Parse.UE4.Objects.Core.Math;
+using CUE4Parse.UE4.Objects.UObject;
 using Newtonsoft.Json.Linq;
 using System.Diagnostics.CodeAnalysis;
 using System.Text;
@@ -27,6 +30,8 @@ namespace IcarusDataMiner
 	{
 		public IcarusDataTable<FIcarusTerrain>? TerrainsTable { get; private set; }
 
+		public IcarusDataTable<FIcarusAtmosphere>? AtmospheresTable { get; private set; }
+
 		public IcarusDataTable<FItemData>? ItemTemplateTable { get; private set; }
 
 		public IcarusDataTable<FItemStaticData>? ItemStaticTable { get; private set; }
@@ -39,22 +44,31 @@ namespace IcarusDataMiner
 
 		public IcarusDataTable<FBreakableRockData>? BreakableRockTable { get; private set; }
 
+		public IcarusDataTable<FAISetup>? AISetupTable { get; private set; }
+
+		public IcarusDataTable<FAICreatureType>? AICreatureTypeTable { get; private set; }
+
+		public IcarusDataTable<FIcarusStatDescription>? StatsTable { get; private set; }
+
 		private DataTables()
 		{
 		}
 
-		[MemberNotNull(nameof(WorkshopItemTable), nameof(ItemTemplateTable), nameof(ItemStaticTable), nameof(ItemableTable))]
 		public static DataTables Load(IFileProvider provider, Logger logger)
 		{
 			return new()
 			{
 				TerrainsTable = LoadDataTable<FIcarusTerrain>(provider, "Prospects/D_Terrains.json"),
+				AtmospheresTable = LoadDataTable<FIcarusAtmosphere>(provider, "Prospects/D_Atmospheres.json"),
 				ItemTemplateTable = LoadDataTable<FItemData>(provider, "Items/D_ItemTemplate.json"),
 				ItemStaticTable = LoadDataTable<FItemStaticData>(provider, "Items/D_ItemsStatic.json"),
 				ItemableTable = LoadDataTable<FItemableData>(provider, "Traits/D_Itemable.json"),
 				ItemRewardsTable = LoadDataTable<FItemRewards>(provider, "Items/D_ItemRewards.json"),
 				WorkshopItemTable = LoadDataTable<FWorkshopItem>(provider, "MetaWorkshop/D_WorkshopItems.json"),
-				BreakableRockTable = LoadDataTable<FBreakableRockData>(provider, "World/D_BreakableRockData.json")
+				BreakableRockTable = LoadDataTable<FBreakableRockData>(provider, "World/D_BreakableRockData.json"),
+				AISetupTable = LoadDataTable<FAISetup>(provider, "AI/D_AISetup.json"),
+				AICreatureTypeTable = LoadDataTable<FAICreatureType>(provider, "AI/D_AICreatureType.json"),
+				StatsTable = LoadDataTable<FIcarusStatDescription>(provider, "Stats/D_Stats.json")
 			};
 		}
 
@@ -86,6 +100,18 @@ namespace IcarusDataMiner
 			return default;
 		}
 
+		public string GetCreatureName(FRowEnum aiSetupRow, IFileProvider locProvider)
+		{
+			FAISetup aiSetup = AISetupTable![aiSetupRow.Value];
+			return GetCreatureName(aiSetup, locProvider);
+		}
+
+		public string GetCreatureName(FAISetup aiSetup, IFileProvider locProvider)
+		{
+			FAICreatureType creatureType = AICreatureTypeTable![aiSetup.CreatureType.RowName];
+			return LocalizationUtil.GetLocalizedString(locProvider, creatureType.CreatureName);
+		}
+
 		public static IcarusDataTable<T> LoadDataTable<T>(IFileProvider provider, string path) where T : IDataTableRow
 		{
 			GameFile file = provider.Files[path];
@@ -110,6 +136,17 @@ namespace IcarusDataMiner
 		public FRowHandle SpawnConfig;
 		public FRowHandle FishConfig;
 		public ObjectPointer AudioZoneMap;
+	}
+
+	internal struct FIcarusAtmosphere : IDataTableRow
+	{
+		public string Name { get; set; }
+		public JObject? Metadata { get; set; }
+
+		public string AtmosphereName;
+		public ObjectPointer Image_Small;
+		public ObjectPointer Image_Medium;
+		public ObjectPointer Image_Large;
 	}
 
 	internal struct FWorkshopItem : IDataTableRow
@@ -225,6 +262,65 @@ namespace IcarusDataMiner
 		public ObjectPointer BreakSound;
 	}
 
+	internal struct FAISetup : IDataTableRow
+	{
+		public string Name { get; set; }
+		public JObject? Metadata { get; set; }
+
+		public ObjectPointer ActorClass;
+		public ObjectPointer ControllerClass;
+		public FRowHandle CreatureType;
+		public List<FRowHandle> Descriptors;
+		public FRowHandle DeadItem;
+		public FRowHandle GOAPSetup;
+		public ObjectPointer DefaultNavigationFilter;
+		public FRowHandle Relationships;
+		public List<FRowHandle> NotifiedNPCTypes;
+		public bool bNotifySelfType;
+		public FRowHandle AIGrowth;
+		public Dictionary<EMovementState, FMovementStateData> MovementMapping;
+		public FRowHandle HuntingSetup;
+		public List<FCriticalHitLocation> CriticalHitBones;
+		public FRowHandle Audio;
+		public List<string> CollisionHitEventBones;
+		public int LatentDeathDuration;
+		public FRowHandle Trophy;
+		public FRowHandle Loot;
+		public FRowHandle Hitable;
+		public bool bUseSurvivalCharacterState;
+		public bool bStartWithSurvivalTickDisabled;
+		public FRowHandle BestiaryGroup;
+		public List<FCriticalHitLocation> BlacklistBones;
+	}
+
+	internal struct FAICreatureType : IDataTableRow
+	{
+		public string Name { get; set; }
+		public JObject? Metadata { get; set; }
+
+		public string CreatureName;
+
+		// NOTE: There is a lot more to this struct we are leaving out because we don't care about it
+	}
+
+	internal struct FIcarusStatDescription : IDataTableRow
+	{
+		public string Name { get; set; }
+		public JObject? Metadata { get; set; }
+
+		public string Title;
+		public ObjectPointer Icon;
+		public string PositiveTitleFormat;
+		public string NegativeTitleFormat;
+		public string PositiveDescription;
+		public string NegativeDescription;
+		public bool bIsReplicated;
+		public List<FStatDisplayCalculation> DisplayOperations;
+		public bool bIsWorldStat;
+		public FRowHandle StatCategory;
+		public bool bHideStatInUserInterface;
+	}
+
 	internal struct FWorkshopCost
 	{
 		public FRowHandle Meta;
@@ -292,6 +388,49 @@ namespace IcarusDataMiner
 	internal struct FGameplayTag
 	{
 		public string TagName; // Actual type is FName, but stored in json files as a string
+	}
+
+	internal enum EMovementState
+	{
+		Undefined,
+		Stationary,
+		Sneak,
+		Walk,
+		Jog,
+		Run,
+		Sprint,
+		Attacking
+	}
+
+	internal struct FMovementStateData
+	{
+		public float MaxWalkSpeed;
+		public float GroundFriction;
+		public float BrakingFriction;
+		public float MaxAcceleration;
+		public float BrakingDeceleration;
+		public float RotationRate;
+		public float MaxSwimSpeed;
+	}
+
+	internal struct FCriticalHitLocation
+	{
+		public string BoneName;
+		public bool AffectsChildren;
+	}
+
+	internal struct FStatDisplayCalculation
+	{
+		public EStatDisplayOperation Operation;
+		public float Value;
+	}
+
+	internal enum EStatDisplayOperation
+	{
+		None,
+		Multiply,
+		Division,
+		Addition
 	}
 
 #pragma warning restore CS0649

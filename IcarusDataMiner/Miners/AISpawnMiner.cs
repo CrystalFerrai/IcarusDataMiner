@@ -42,11 +42,8 @@ namespace IcarusDataMiner.Miners
 			GameFile spawnZonesFile = providerManager.DataProvider.Files["AI/D_AISpawnZones.json"];
 			IcarusDataTable<FAISpawnZones> spawnZoneTable = IcarusDataTable<FAISpawnZones>.DeserializeTable("D_AISpawnZones", Encoding.UTF8.GetString(spawnZonesFile.Read()));
 
-			GameFile setupFile = providerManager.DataProvider.Files["AI/D_AISetup.json"];
-			IcarusDataTable<FAISetup> setupTable = IcarusDataTable<FAISetup>.DeserializeTable("D_AISetup", Encoding.UTF8.GetString(setupFile.Read()));
-
-			GameFile creatureTypeFile = providerManager.DataProvider.Files["AI/D_AICreatureType.json"];
-			IcarusDataTable<FAICreatureType> creatureTypeTable = IcarusDataTable<FAICreatureType>.DeserializeTable("D_AICreatureType", Encoding.UTF8.GetString(creatureTypeFile.Read()));
+			IcarusDataTable<FAISetup> setupTable = providerManager.DataTables.AISetupTable!;
+			IcarusDataTable<FAICreatureType> creatureTypeTable = providerManager.DataTables.AICreatureTypeTable!;
 
 			GameFile autonomousSpawnsFile = providerManager.DataProvider.Files["AI/D_AutonomousSpawns.json"];
 			IcarusDataTable<FAutonomousSpawnData> autonomousSpawnsTable = IcarusDataTable<FAutonomousSpawnData>.DeserializeTable("D_AutonomousSpawns", Encoding.UTF8.GetString(autonomousSpawnsFile.Read()));
@@ -54,9 +51,7 @@ namespace IcarusDataMiner.Miners
 			// Gather data
 			string getCreatureName(FRowEnum aiSetupRow)
 			{
-				FAISetup aiSetup = setupTable[aiSetupRow.Value];
-				FAICreatureType creatureType = creatureTypeTable[aiSetup.CreatureType.RowName];
-				return LocalizationUtil.GetLocalizedString(providerManager.AssetProvider, creatureType.CreatureName);
+				return providerManager.DataTables.GetCreatureName(aiSetupRow, providerManager.AssetProvider);
 			}
 
 			HashSet<string> spawnConfigSet = new();
@@ -106,8 +101,10 @@ namespace IcarusDataMiner.Miners
 					{
 						foreach (FRowHandle autoSpawnerRow in zone.Creatures.RelevantAutonomousSpawners)
 						{
-							FAutonomousSpawnData autoSpawnData = autonomousSpawnsTable[autoSpawnerRow.RowName];
-							autonomousSpawnCreatures.Add(getCreatureName(autoSpawnData.AISetup));
+							if (autonomousSpawnsTable.TryGetValue(autoSpawnerRow.RowName, out FAutonomousSpawnData autoSpawnData))
+							{
+								autonomousSpawnCreatures.Add(getCreatureName(autoSpawnData.AISetup));
+							}
 						}
 					}
 					autonomousSpawnCreatures.Sort();
@@ -125,7 +122,15 @@ namespace IcarusDataMiner.Miners
 					}
 					else
 					{
-						if (nextCompositeId > 'Z') throw new NotImplementedException("Too many composites for single letter names. Need to expand this.");
+						if (nextCompositeId > 'Z')
+						{
+							// 0 looks like O, so skip it
+							nextCompositeId = '1';
+						}
+						if (nextCompositeId > '9' && nextCompositeId < 'A')
+						{
+							throw new NotImplementedException("Too many composites for single letter names. Need to expand this.");
+						}
 						compositeZone = new(nextCompositeId.ToString(), newSpawnZone);
 						compositeZoneMap.Add(creatureHash, compositeZone);
 						++nextCompositeId;
@@ -509,26 +514,6 @@ namespace IcarusDataMiner.Miners
 			public Dictionary<FRowEnum, int> SpawnList;
 			public int BiomeSpawnDensity;
 			public List<FRowHandle> RelevantAutonomousSpawners;
-		}
-
-		private struct FAISetup : IDataTableRow
-		{
-			public string Name { get; set; }
-			public JObject? Metadata { get; set; }
-
-			public FRowHandle CreatureType;
-
-			// NOTE: There is a lot more to this struct we are leaving out because we don't care about it
-		}
-
-		private struct FAICreatureType : IDataTableRow
-		{
-			public string Name { get; set; }
-			public JObject? Metadata { get; set; }
-
-			public string CreatureName;
-
-			// NOTE: There is a lot more to this struct we are leaving out because we don't care about it
 		}
 
 		private struct FAutonomousSpawnData : IDataTableRow

@@ -15,10 +15,8 @@
 using CUE4Parse.UE4.Objects.Core.i18N;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
-using Newtonsoft.Json.Serialization;
 using System.Collections;
 using System.ComponentModel;
-using System.ComponentModel.DataAnnotations;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Reflection;
@@ -335,7 +333,7 @@ namespace IcarusDataMiner
 		{
 			if (value is string strValue)
 			{
-				FRowEnum instance = new FRowEnum();
+				FRowEnum instance = new();
 
 				// (Value=\"Foo\")
 				strValue = strValue.Trim('(', ')');
@@ -633,7 +631,7 @@ namespace IcarusDataMiner
 			return mRawText;
 		}
 
-		public string? GetAssetPath()
+		public string? GetAssetPath(bool appendExtension = false)
 		{
 			if (mPath == null) return null;
 
@@ -648,6 +646,16 @@ namespace IcarusDataMiner
 			if (dotIndex >= 0)
 			{
 				assetPath = assetPath.Substring(0, dotIndex);
+			}
+
+			if (assetPath.Equals("None", StringComparison.OrdinalIgnoreCase))
+			{
+				return assetPath;
+			}
+
+			if (appendExtension)
+			{
+				return $"{assetPath}.uasset";
 			}
 
 			return assetPath;

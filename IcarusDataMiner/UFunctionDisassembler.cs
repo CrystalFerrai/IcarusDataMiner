@@ -1,4 +1,4 @@
-﻿// Copyright 2022 Crystal Ferrai
+﻿// Copyright 2024 Crystal Ferrai
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,6 +28,8 @@ namespace IcarusDataMiner
 	/// </remarks>
 	internal class UFunctionDisassembler : IDisposable
 	{
+		private const string BlockSeparator = "--------------------------------------------------------------------------------";
+
 		private readonly Package mPackage;
 
 		private readonly MemoryStream mStream;
@@ -68,7 +70,7 @@ namespace IcarusDataMiner
 			List<Operation> operations = new();
 			string assembly = instance.Process(operations);
 
-			return new DisassembledFunction(functionFlags, operations, assembly);
+			return new DisassembledFunction(function.Name, functionFlags, operations, assembly);
 		}
 
 		private string Process(IList<Operation> operations)
@@ -341,6 +343,11 @@ namespace IcarusDataMiner
 
 						--mIndentLevel;
 
+						if (mIndentLevel == 0)
+						{
+							mWriter.WriteLine(BlockSeparator);
+						}
+
 						operations.Add(new Operation(opcode, childOperations));
 						break;
 					}
@@ -349,6 +356,10 @@ namespace IcarusDataMiner
 					{
 						int skipCount = ReadInt32(ref offset);
 						Log(opOffset, opcode, $"Offset = 0x{skipCount:X}");
+						if (mIndentLevel == 0)
+						{
+							mWriter.WriteLine(BlockSeparator);
+						}
 						break;
 					}
 				case EExprToken.LocalVariable:
@@ -481,7 +492,7 @@ namespace IcarusDataMiner
 				case EExprToken.SkipOffsetConst:
 					{
 						int constValue = ReadInt32(ref offset);
-						Log(opOffset, opcode, constValue.ToString());
+						Log(opOffset, opcode, $"0x{constValue:X}");
 						operations.Add(new Operation<int>(opcode, constValue));
 						break;
 					}
@@ -809,6 +820,10 @@ namespace IcarusDataMiner
 					{
 						Log(opOffset, opcode, "Jump to statement at FlowStack.Pop()");
 						operations.Add(new Operation(opcode));
+						if (mIndentLevel == 0)
+						{
+							mWriter.WriteLine(BlockSeparator);
+						}
 						break;
 					}
 				case EExprToken.PopExecutionFlowIfNot:
@@ -1428,14 +1443,17 @@ namespace IcarusDataMiner
 
 	internal class DisassembledFunction
 	{
+		public string Name { get; }
+
 		public EFunctionFlags FunctionFlags { get; }
 
 		public IReadOnlyList<Operation> Script { get; }
 
 		public string Assembly { get; }
 
-		internal DisassembledFunction(EFunctionFlags functionFlags, IReadOnlyList<Operation> script, string assembly)
+		internal DisassembledFunction(string name, EFunctionFlags functionFlags, IReadOnlyList<Operation> script, string assembly)
 		{
+			Name = name;
 			FunctionFlags = functionFlags;
 			Script = script;
 			Assembly = assembly;

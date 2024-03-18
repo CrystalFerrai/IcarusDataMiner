@@ -16,7 +16,9 @@ using CUE4Parse.FileProvider;
 using CUE4Parse.UE4.Objects.Core.Math;
 using CUE4Parse.UE4.Readers;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using SkiaSharp;
+using System.Text;
 
 namespace IcarusDataMiner.Miners
 {
@@ -329,6 +331,9 @@ namespace IcarusDataMiner.Miners
 				TextAlign = SKTextAlign.Left
 			};
 
+			using SKPaint title2RightPaint = title2Paint.Clone();
+			title2RightPaint.TextAlign = SKTextAlign.Right;
+
 			using SKPaint bodyPaint = new()
 			{
 				Color = TextColor,
@@ -390,10 +395,6 @@ namespace IcarusDataMiner.Miners
 					// Title
 					canvas.DrawText($"{storm.DisplayName} ({storm.Name})", StartX + BarSpacing, TitleTextSize + 26.0f, titlePaint);
 
-					// Duration header
-					string durationLabel = $"Total {Math.Round(storm.Actions.Sum(a => a.TimeInSeconds))} seconds";
-					canvas.DrawText(durationLabel, StartX + BarSpacing, surfaceInfo.Height - PadY + 26.0f + BodyTextSize, title2Paint);
-
 					// Graph lines
 					canvas.DrawRect(StartX, StartY - 1, surfaceInfo.Width - PadX - StartX, surfaceInfo.Height - PadY - StartY + 1, linePaint);
 
@@ -415,6 +416,16 @@ namespace IcarusDataMiner.Miners
 
 						currentX += barWidth + BarSpacing;
 					}
+
+					float footerPosY = surfaceInfo.Height - PadY + 26.0f + BodyTextSize;
+
+					// Biomes
+					string biomes = $"Biomes: {string.Join(", ", storm.Biomes)}";
+					canvas.DrawText(biomes, StartX + BarSpacing, footerPosY, title2Paint);
+
+					// Total duration
+					string durationLabel = $"Total {Math.Round(storm.Actions.Sum(a => a.TimeInSeconds))} seconds";
+					canvas.DrawText(durationLabel, currentX, footerPosY, title2RightPaint);
 
 					surface.Flush();
 					SKImage image = surface.Snapshot();
@@ -556,6 +567,8 @@ namespace IcarusDataMiner.Miners
 		{
 			List<WeatherEvent> storms = new();
 
+			IReadOnlyDictionary<string, IReadOnlyList<string>> poolMap = BuildPoolMap(providerManager);
+
 			GameFile file = providerManager.DataProvider.Files["Weather/D_WeatherEvents.json"];
 
 			using (FArchive archive = file.CreateReader())
@@ -563,7 +576,7 @@ namespace IcarusDataMiner.Miners
 			using (JsonReader reader = new JsonTextReader(stream))
 			{
 				WeatherEventParseState state = WeatherEventParseState.SearchingForRows;
-				int objectDepth = 0, actionsDepth = 0;
+				int objectDepth = 0, biomesDepth = 0, actionsDepth = 0;
 
 				WeatherEvent storm = new();
 				WeatherAction action = new();
@@ -610,20 +623,54 @@ namespace IcarusDataMiner.Miners
 								{
 									storm.DisplayName = LocalizationUtil.GetLocalizedString(providerManager.AssetProvider, reader.ReadAsString()!);
 								}
+								else if (reader.Value!.Equals("BiomeGroups"))
+								{
+									reader.Read();
+									biomesDepth = reader.Depth + 1;
+									state = WeatherEventParseState.InBiomes;
+								}
 								else if (reader.Value!.Equals("WeatherActions"))
 								{
 									reader.Read();
-									reader.Read();
-									actionsDepth = reader.Depth;
+									actionsDepth = reader.Depth + 1;
 									state = WeatherEventParseState.InActions;
 								}
 							}
 							if (reader.Depth < objectDepth)
 							{
+								if (poolMap.TryGetValue(storm.Name!, out IReadOnlyList<string>? stormPools))
+								{
+									storm.Pools.AddRange(stormPools);
+								}
+
 								storms.Add(storm);
 								storm = new();
 
 								state = WeatherEventParseState.InRows;
+							}
+							break;
+						case WeatherEventParseState.InBiomes:
+							if (reader.TokenType == JsonToken.StartObject)
+							{
+								state = WeatherEventParseState.InBiome;
+							}
+							if (reader.Depth < biomesDepth)
+							{
+								state = WeatherEventParseState.InObject;
+							}
+							break;
+						case WeatherEventParseState.InBiome:
+							if (reader.TokenType == JsonToken.PropertyName)
+							{
+								if (reader.Value!.Equals("RowName"))
+								{
+									string name = reader.ReadAsString()!;
+									storm.Biomes.Add(name);
+								}
+							}
+							if (reader.Depth < biomesDepth + 1)
+							{
+								state = WeatherEventParseState.InBiomes;
 							}
 							break;
 						case WeatherEventParseState.InActions:
@@ -674,11 +721,42 @@ namespace IcarusDataMiner.Miners
 			return storms;
 		}
 
+		private IReadOnlyDictionary<string, IReadOnlyList<string>> BuildPoolMap(IProviderManager providerManager)
+		{
+			GameFile weatherPoolFile = providerManager.DataProvider.Files["Weather/D_WeatherPools.json"];
+			IcarusDataTable<FIcarusWeatherPoolData> weatherPoolTable = IcarusDataTable<FIcarusWeatherPoolData>.DeserializeTable("D_WeatherPools", Encoding.UTF8.GetString(weatherPoolFile.Read()));
+
+			Dictionary<string, IReadOnlyList<string>> map = new();
+
+			foreach (FIcarusWeatherPoolData pool in weatherPoolTable.Values)
+			{
+				foreach (FWeatherPoolEntry entry in pool.WeatherEvents)
+				{
+					List<string> stormPools;
+					if (map.TryGetValue(entry.Event.RowName, out IReadOnlyList<string>? list))
+					{
+						stormPools = (List<string>)list;
+					}
+					else
+					{
+						stormPools = new();
+						map.Add(entry.Event.RowName, stormPools);
+					}
+
+					stormPools.Add(pool.Name);
+				}
+			}
+
+			return map;
+		}
+
 		private enum WeatherEventParseState
 		{
 			SearchingForRows,
 			InRows,
 			InObject,
+			InBiomes,
+			InBiome,
 			InActions,
 			InAction,
 			Done
@@ -762,6 +840,8 @@ namespace IcarusDataMiner.Miners
 			public string? Name;
 			public string? DisplayName; // WeatherName
 			public int Tier;
+			public List<string> Pools;
+			public List<string> Biomes; //BiomeGroups
 			public List<WeatherAction> Actions; // WeatherActions
 
 			public WeatherEvent()
@@ -769,6 +849,8 @@ namespace IcarusDataMiner.Miners
 				Name = null;
 				DisplayName = null;
 				Tier = 0;
+				Pools = new();
+				Biomes = new();
 				Actions = new();
 			}
 
@@ -839,5 +921,32 @@ namespace IcarusDataMiner.Miners
 				return RowName;
 			}
 		}
+
+#pragma warning disable CS0649 // Field never assigned to
+
+		private struct FIcarusWeatherPoolData : IDataTableRow
+		{
+			public string Name { get; set; }
+			public JObject? Metadata { get; set; }
+
+			public List<FWeatherPoolEntry> WeatherEvents;
+			public List<FWeatherPoolEntryMeta> ContainedTiers;
+		}
+
+		private struct FWeatherPoolEntry
+		{
+			public FRowHandle Event;
+			public float Weight;
+		}
+
+		private struct FWeatherPoolEntryMeta
+		{
+			public int Tier;
+			public int NumEvents;
+			public int MinEventDurationMinutes;
+			public List<string> BiomesGroupsIncluded;
+		}
 	}
+
+#pragma warning restore CS0649
 }

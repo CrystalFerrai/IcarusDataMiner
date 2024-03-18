@@ -20,7 +20,7 @@ namespace IcarusDataMiner
 	internal static class IOUtil
 	{
 		/// <summary>
-		/// Attempts to create a file. Will rety indefinitely until it succeeds or the application terminates
+		/// Attempts to create a file. Will retry indefinitely until it succeeds or the application terminates
 		/// </summary>
 		/// <param name="path">Path to the file to create</param>
 		/// <param name="logger">Used to log messages about file creation issues for the user to see</param>

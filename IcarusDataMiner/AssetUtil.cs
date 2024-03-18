@@ -16,6 +16,7 @@ using CUE4Parse.FileProvider;
 using CUE4Parse.UE4.Assets;
 using CUE4Parse.UE4.Assets.Exports;
 using CUE4Parse.UE4.Assets.Exports.Texture;
+using CUE4Parse.UE4.Objects.Core.Math;
 using CUE4Parse.UE4.Objects.UObject;
 using CUE4Parse_Conversion.Textures;
 using SkiaSharp;
@@ -115,6 +116,107 @@ namespace IcarusDataMiner
 			}
 
 			return bitmap;
+		}
+
+		/// <summary>
+		/// Decode and export a texture asset to a file
+		/// </summary>
+		/// <param name="assetPath">The asset path</param>
+		/// <param name="provider">The asset provider</param>
+		/// <param name="outDir">The output directory for the exported file</param>
+		/// <param name="logger">For logging messages about issues encountered</param>
+		/// <param name="outName">Name of output file without extension. In not supplied, will use name of asset.</param>
+		/// <returns>The path to the output file</returns>
+		public static string ExportTexture(string assetPath, IFileProvider provider, string outDir, Logger logger, string? outName = null)
+		{
+			string displayName = Path.GetFileNameWithoutExtension(assetPath);
+			SKBitmap? texture = LoadAndDecodeTexture(displayName, assetPath, provider, logger);
+			if (texture is null)
+			{
+				logger.Log(LogLevel.Error, $"Error loading texture '{assetPath}'");
+				return string.Empty;
+			}
+			SKData outData = texture.Encode(SKEncodedImageFormat.Png, 100);
+
+			string outPath = Path.Combine(outDir, $"{outName ?? Path.GetFileNameWithoutExtension(assetPath)}.png");
+			using (FileStream outStream = IOUtil.CreateFile(outPath, logger))
+			{
+				outData.SaveTo(outStream);
+			}
+
+			return outPath;
+		}
+
+		/// <summary>
+		/// Decode and export a texture asset to a file
+		/// </summary>
+		/// <param name="assetPath">The asset path</param>
+		/// <param name="provider">The asset provider</param>
+		/// <param name="outDir">The output directory for the exported file</param>
+		/// <param name="logger">For logging messages about issues encountered</param>
+		/// <param name="tint">Multiply all pixels by this color value</param>
+		/// <param name="outName">Name of output file without extension. In not supplied, will use name of asset.</param>
+		/// <returns>The path to the output file</returns>
+		public static string ExportTexture(string assetPath, IFileProvider provider, string outDir, Logger logger, FLinearColor tint, string? outName = null)
+		{
+			return ExportTexture(assetPath, provider, outDir, logger, ColorUtil.ToSKColor(tint), outName);
+		}
+
+		/// <summary>
+		/// Decode and export a texture asset to a file
+		/// </summary>
+		/// <param name="assetPath">The asset path</param>
+		/// <param name="provider">The asset provider</param>
+		/// <param name="outDir">The output directory for the exported file</param>
+		/// <param name="logger">For logging messages about issues encountered</param>
+		/// <param name="tint">Multiply all pixels by this color value</param>
+		/// <param name="outName">Name of output file without extension. In not supplied, will use name of asset.</param>
+		/// <returns>The path to the output file</returns>
+		public static string ExportTexture(string assetPath, IFileProvider provider, string outDir, Logger logger, SKColor tint, string? outName = null)
+		{
+			string displayName = Path.GetFileNameWithoutExtension(assetPath);
+			SKBitmap? texture = LoadAndDecodeTexture(displayName, assetPath, provider, logger);
+			if (texture is null)
+			{
+				logger.Log(LogLevel.Error, $"Error loading texture '{assetPath}'");
+				return string.Empty;
+			}
+
+			int imageWidth = texture.Width;
+			int imageHeight = texture.Height;
+
+			SKImageInfo surfaceInfo = new()
+			{
+				Width = imageWidth,
+				Height = imageHeight,
+				ColorSpace = SKColorSpace.CreateSrgb(),
+				ColorType = SKColorType.Rgba8888,
+				AlphaType = SKAlphaType.Premul
+			};
+
+			SKData outData;
+			using (SKSurface surface = SKSurface.Create(surfaceInfo))
+			{
+				SKCanvas canvas = surface.Canvas;
+				using SKPaint paint = new()
+				{
+					ColorFilter = SKColorFilter.CreateBlendMode(tint, SKBlendMode.SrcIn)
+				};
+
+				canvas.DrawBitmap(texture, SKPoint.Empty, paint);
+
+				surface.Flush();
+				SKImage image = surface.Snapshot();
+				outData = image.Encode(SKEncodedImageFormat.Png, 100);
+			}
+
+			string outPath = Path.Combine(outDir, $"{outName ?? Path.GetFileNameWithoutExtension(assetPath)}.png");
+			using (FileStream outStream = IOUtil.CreateFile(outPath, logger))
+			{
+				outData.SaveTo(outStream);
+			}
+
+			return outPath;
 		}
 	}
 }
