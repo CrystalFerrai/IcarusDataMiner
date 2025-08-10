@@ -454,9 +454,7 @@ namespace IcarusDataMiner.Miners
 
 		private void ResolveItemNames(IEnumerable<RewardData> rewards, IProviderManager providerManager, Logger logger)
 		{
-			Dictionary<string, RewardData> templateToReward = new(rewards
-				.Where(r => r.Item != null)
-				.Select(r => new KeyValuePair<string, RewardData>(r.Item!, r)));
+			HashSet<string> itemNames = new(rewards.Where(r => r.Item != null).Select(r => r.Item!));
 
 			Dictionary<string, string> staticToTemplate = new();
 			{
@@ -503,7 +501,7 @@ namespace IcarusDataMiner.Miners
 									if (reader.Value!.Equals("Name"))
 									{
 										string? templateName = reader.ReadAsString();
-										if (templateName != null && templateToReward.ContainsKey(templateName))
+										if (templateName != null && itemNames.Contains(templateName))
 										{
 											currentTemplateName = templateName;
 											state = ItemParseState.FindProperty;
@@ -626,10 +624,15 @@ namespace IcarusDataMiner.Miners
 
 			foreach (var pair in itemableToStatic)
 			{
-				RewardData? target = templateToReward[staticToTemplate[pair.Value]];
-#pragma warning disable CS8604 // Possible null reference argument. Null is a valid argument for "defaultValue"
-				target!.ItemDisplayName = providerManager.AssetProvider.GetLocalizedString("D_Itemable", $"{pair.Key}-DisplayName", target!.Item);
-#pragma warning restore CS8604 // Possible null reference argument.
+				string itemTemplate = staticToTemplate[pair.Value];
+				string itemDisplayName = providerManager.AssetProvider.GetLocalizedString("D_Itemable", $"{pair.Key}-DisplayName", itemTemplate);
+				foreach (RewardData reward in rewards)
+				{
+					if (reward.Item! == itemTemplate)
+					{
+						reward.ItemDisplayName = itemDisplayName;
+					}
+				}
 			}
 		}
 

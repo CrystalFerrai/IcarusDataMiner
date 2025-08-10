@@ -49,7 +49,7 @@ namespace IcarusDataMiner.Miners
 			IcarusDataTable<FAutonomousSpawnData> autonomousSpawnsTable = IcarusDataTable<FAutonomousSpawnData>.DeserializeTable("D_AutonomousSpawns", Encoding.UTF8.GetString(autonomousSpawnsFile.Read()));
 
 			// Gather data
-			string getCreatureName(FRowEnum aiSetupRow)
+			string? getCreatureName(FRowEnum aiSetupRow)
 			{
 				return providerManager.DataTables.GetCreatureName(aiSetupRow, providerManager.AssetProvider);
 			}
@@ -90,7 +90,7 @@ namespace IcarusDataMiner.Miners
 					{
 						foreach (var creatureSpawnPair in zone.Creatures.SpawnList)
 						{
-							creatures.Add(new WeightedItem(getCreatureName(creatureSpawnPair.Key), creatureSpawnPair.Value));
+							creatures.Add(new WeightedItem(getCreatureName(creatureSpawnPair.Key)!, creatureSpawnPair.Value));
 						}
 					}
 					creatures.Sort();
@@ -103,7 +103,7 @@ namespace IcarusDataMiner.Miners
 						{
 							if (autonomousSpawnsTable.TryGetValue(autoSpawnerRow.RowName, out FAutonomousSpawnData autoSpawnData))
 							{
-								autonomousSpawnCreatures.Add(getCreatureName(autoSpawnData.AISetup));
+								autonomousSpawnCreatures.Add(getCreatureName(autoSpawnData.AISetup) ?? autoSpawnData.Name);
 							}
 						}
 					}
@@ -137,8 +137,6 @@ namespace IcarusDataMiner.Miners
 					}
 
 					newSpawnZone.CompositeId = compositeZone.Id;
-
-					if (newSpawnZone.SpawnDensity != compositeZone.SpawnDensity) throw new NotImplementedException("Found two spawn zones with the same creatures but different spawn density. We need to implement separating spawn composites by desnsity if this ever comes up.");
 				}
 
 				SKBitmap? spawnMap = null;
@@ -409,6 +407,7 @@ namespace IcarusDataMiner.Miners
 				{
 					hash = hash * 23 + creature.GetHashCode();
 				}
+				hash = hash * 23 + SpawnDensity.GetHashCode();
 				return hash;
 			}
 

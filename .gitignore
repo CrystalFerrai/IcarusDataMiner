@@ -6,5 +6,6 @@ x64/**
 /*/bin/**
 /*/obj/**
 **/Properties/launchSettings.json
+Exclude/**
 /IcarusDataMiner/Crc.cs
 /IcarusDataMiner/Miners/TestMiner.cs

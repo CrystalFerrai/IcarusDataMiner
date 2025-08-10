@@ -112,7 +112,6 @@ namespace IcarusDataMiner.Miners
 
 				foreach (CreatureGrowthData creature in creatures)
 				{
-					if (creature.Name.Contains("Lava")) System.Diagnostics.Debugger.Break();
 					if (creature.HealthCurve is null && creature.DamageCurve is null)
 					{
 						writer.WriteLine($"{creature},,{creature.BaseHealth:0.},{(creature.BaseMeleeDamage != 0 ? creature.BaseMeleeDamage : creature.BaseExplosiveDamage):0.}");

@@ -100,8 +100,10 @@ namespace IcarusDataMiner
 			return default;
 		}
 
-		public string GetCreatureName(FRowEnum aiSetupRow, IFileProvider locProvider)
+		public string? GetCreatureName(FRowEnum aiSetupRow, IFileProvider locProvider)
 		{
+			if (aiSetupRow.Value == "None") return null;
+
 			FAISetup aiSetup = AISetupTable![aiSetupRow.Value];
 			return GetCreatureName(aiSetup, locProvider);
 		}
