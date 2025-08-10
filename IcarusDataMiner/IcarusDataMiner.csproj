@@ -35,4 +35,12 @@
     <EmbeddedResource Include="Resources\icon_redexotic.png" />
   </ItemGroup>
 
+  <ItemGroup>
+	<UpToDateCheckInput Include="$(SolutionDir)lib\oo2core_9_win64.dll" />
+  </ItemGroup>
+
+  <Target Name="PostBuild" AfterTargets="PostBuildEvent">
+    <Copy SourceFiles="$(ProjectDir)..\lib\oo2core_9_win64.dll" DestinationFolder="$(TargetDir)" />
+  </Target>
+
 </Project>

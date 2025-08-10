@@ -14,7 +14,6 @@
 
 using SkiaSharp;
 using System.Diagnostics.CodeAnalysis;
-using System.Drawing;
 
 namespace IcarusDataMiner.Miners
 {

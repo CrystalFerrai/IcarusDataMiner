@@ -236,34 +236,6 @@ namespace IcarusDataMiner.Miners
 		{
 			Package mapPackage = (Package)providerManager.AssetProvider.LoadPackage(mapAsset);
 
-			int worldSettingsTypeNameIndex = -1, caveLocationsIndex = -1, templateIndex = -1;
-			for (int i = 0; i < mapPackage.NameMap.Length; ++i)
-			{
-				FNameEntrySerialized name = mapPackage.NameMap[i];
-				switch (name.Name)
-				{
-					case "BP_IcarusWorldSettings_C":
-						worldSettingsTypeNameIndex = i;
-						break;
-					case "CaveLocations":
-						caveLocationsIndex = i;
-						break;
-					case "Template":
-						templateIndex = i;
-						break;
-				}
-			}
-
-			int worldSettingsTypeIndex = -1;
-			for (int i = 0; i < mapPackage.ImportMap.Length; ++i)
-			{
-				if (mapPackage.ImportMap[i].ObjectName.Index == worldSettingsTypeNameIndex)
-				{
-					worldSettingsTypeIndex = ~i;
-					break;
-				}
-			}
-
 			// Build lists of caves by searching developer sublevels for the map
 			List<CaveData> templateCaves = new List<CaveData>();
 			List<CaveData> customCaves = new List<CaveData>();

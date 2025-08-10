@@ -22,7 +22,6 @@ using CUE4Parse.UE4.Objects.UObject;
 using CUE4Parse.UE4.Readers;
 using Newtonsoft.Json;
 using SkiaSharp;
-using System.Security.AccessControl;
 
 namespace IcarusDataMiner.Miners
 {
@@ -865,10 +864,10 @@ namespace IcarusDataMiner.Miners
 
 			public bool AddLocation(FVector location)
 			{
-				if (location.X < MaxX + GroupDistanceThreshold &&
-					location.X > MinX - GroupDistanceThreshold &&
-					location.Y < MaxY + GroupDistanceThreshold &&
-					location.Y > MinY - GroupDistanceThreshold)
+				if (location.X < MinX + GroupDistanceThreshold &&
+					location.X > MaxX - GroupDistanceThreshold &&
+					location.Y < MinY + GroupDistanceThreshold &&
+					location.Y > MaxY - GroupDistanceThreshold)
 				{
 					if (location.X < MinX) MinX = location.X;
 					else if (location.X > MaxX) MaxX = location.X;

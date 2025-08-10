@@ -98,7 +98,7 @@ namespace IcarusDataMiner
 				case EExprToken.PrimitiveCast:
 					{
 						// A type conversion.
-						byte conversionType = ReadByte(ref offset);
+						ECastToken conversionType = (ECastToken)ReadByte(ref offset);
 						Log(opOffset, opcode, $"Type {conversionType}");
 
 						List<Operation> childOperations = new();
@@ -106,7 +106,7 @@ namespace IcarusDataMiner
 						Log("Argument:");
 						ProcessExpr(childOperations, ref offset);
 
-						operations.Add(new Operation<byte>(opcode, conversionType, childOperations));
+						operations.Add(new Operation<ECastToken>(opcode, conversionType, childOperations));
 						break;
 					}
 				case EExprToken.SetSet:
@@ -125,12 +125,6 @@ namespace IcarusDataMiner
 						operations.Add(new Operation(opcode, childOperations));
 						break;
 					}
-				case EExprToken.EndSet:
-					{
-						Log(opOffset, opcode);
-						operations.Add(new Operation(opcode));
-						break;
-					}
 				case EExprToken.SetConst:
 					{
 						FieldReference? innerProp = ReadField(ref offset);
@@ -145,12 +139,6 @@ namespace IcarusDataMiner
 						}
 
 						operations.Add(new Operation<int>(opcode, count, childOperations));
-						break;
-					}
-				case EExprToken.EndSetConst:
-					{
-						Log(opOffset, opcode);
-						operations.Add(new Operation(opcode));
 						break;
 					}
 				case EExprToken.SetMap:
@@ -170,12 +158,6 @@ namespace IcarusDataMiner
 						operations.Add(new Operation<Operation>(opcode, keyOperations[0], valueOperations));
 						break;
 					}
-				case EExprToken.EndMap:
-					{
-						Log(opOffset, opcode);
-						operations.Add(new Operation(opcode));
-						break;
-					}
 				case EExprToken.MapConst:
 					{
 						FieldReference? keyProp = ReadField(ref offset);
@@ -191,12 +173,6 @@ namespace IcarusDataMiner
 						}
 
 						operations.Add(new Operation<MapOperand>(opcode, new MapOperand(keyProp, valueProp), childOperations));
-						break;
-					}
-				case EExprToken.EndMapConst:
-					{
-						Log(opOffset, opcode);
-						operations.Add(new Operation(opcode));
 						break;
 					}
 				case EExprToken.ObjToInterfaceCast:
@@ -391,10 +367,6 @@ namespace IcarusDataMiner
 					}
 				case EExprToken.Nothing:
 				case EExprToken.EndOfScript:
-				case EExprToken.EndFunctionParms:
-				case EExprToken.EndStructConst:
-				case EExprToken.EndArray:
-				case EExprToken.EndArrayConst:
 				case EExprToken.IntZero:
 				case EExprToken.IntOne:
 				case EExprToken.True:
@@ -405,6 +377,19 @@ namespace IcarusDataMiner
 				case EExprToken.EndParmValue:
 					{
 						Log(opOffset, opcode);
+						operations.Add(new Operation(opcode));
+						break;
+					}
+				case EExprToken.EndArray:
+				case EExprToken.EndArrayConst:
+				case EExprToken.EndFunctionParms:
+				case EExprToken.EndMap:
+				case EExprToken.EndMapConst:
+				case EExprToken.EndSet:
+				case EExprToken.EndSetConst:
+				case EExprToken.EndStructConst:
+					{
+						// Don't log these because they are implied
 						operations.Add(new Operation(opcode));
 						break;
 					}
@@ -686,7 +671,7 @@ namespace IcarusDataMiner
 						FieldReference? innerPropName = ReadField(ref offset);
 						int num = ReadInt32(ref offset);
 
-						Log(opOffset, opcode, $"Type: {innerPropName}, Count: {null}");
+						Log(opOffset, opcode, $"Type: {innerPropName}, Count: {num}");
 
 						List<Operation> childOperations = new();
 						while (ProcessExpr(childOperations, ref offset) != EExprToken.EndArrayConst)
@@ -1229,7 +1214,7 @@ namespace IcarusDataMiner
 	};
 
 	// From Script.h
-	enum EScriptInstrumentation : byte
+	internal enum EScriptInstrumentation : byte
 	{
 		Class = 0,
 		ClassScope,
@@ -1249,6 +1234,15 @@ namespace IcarusDataMiner
 		TunnelEndOfThread,
 		Stop
 	}
+
+	// From Script.h
+	enum ECastToken
+	{
+		ObjectToInterface = 0x46,
+		ObjectToBool = 0x47,
+		InterfaceToBool = 0x49,
+		Max = 0xFF,
+	};
 
 	internal class Operation
 	{
