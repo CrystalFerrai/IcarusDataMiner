@@ -135,7 +135,7 @@ namespace IcarusDataMiner.Miners
 				foreach (Tile tile in tiles)
 				{
 					SKPoint position = new(totalWidth - (tile.Y + 1) * tileWidth, totalHeight - (tile.X + 1) * tileHeight);
-					canvas.DrawBitmap(tile.Bitmap, position);
+					canvas.DrawBitmap(tile.Bitmap, new SKRect(position.X, position.Y, position.X + tileWidth, position.Y + tileHeight));
 				}
 
 				surface.Flush();
