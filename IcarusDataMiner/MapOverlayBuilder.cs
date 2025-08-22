@@ -24,9 +24,6 @@ namespace IcarusDataMiner
 	/// </summary>
 	internal class MapOverlayBuilder
 	{
-		// Used to adjust scaling for map images that do not use the standard world to map ratio.
-		private const float MapScaleFactor = (float)WorldDataUtil.MapToWorld * 0.5f;
-
 		private static readonly SKTypeface sTextTypeFace = SKTypeface.FromFamilyName("Segoe UI", SKFontStyleWeight.Normal, SKFontStyleWidth.Normal, SKFontStyleSlant.Upright);
 		private const float sTextSize = 18.0f;
 
@@ -35,8 +32,9 @@ namespace IcarusDataMiner
 		private readonly float mOriginOffsetX, mOriginOffsetY;
 		private readonly int mMapWidth, mMapHeight;
 		private readonly float mWorldToMapX, mWorldToMapY;
+		private readonly float mMapScaleFactor;
 
-		private MapOverlayBuilder(float originOffsetX, float originOffsetY, int mapWidth, int mapHeight, float worldToMapX, float worldToMapY)
+		private MapOverlayBuilder(float originOffsetX, float originOffsetY, int mapWidth, int mapHeight, float worldToMapX, float worldToMapY, float scaleFactor)
 		{
 			mLocationCollections = new();
 			mOriginOffsetX = originOffsetX;
@@ -45,6 +43,7 @@ namespace IcarusDataMiner
 			mMapHeight = mapHeight;
 			mWorldToMapX = worldToMapX;
 			mWorldToMapY = worldToMapY;
+			mMapScaleFactor = scaleFactor;
 		}
 
 		/// <summary>
@@ -60,20 +59,23 @@ namespace IcarusDataMiner
 			float mapWidth = worldData.MinimapData.WorldBoundaryMax.X - offsetX;
 			float mapHeight = worldData.MinimapData.WorldBoundaryMax.Y - offsetY;
 
-			float scaleX = (float)(1.0f / WorldDataUtil.MapToWorld);
-			float scaleY = (float)(1.0f / WorldDataUtil.MapToWorld);
+			float scaleX = (float)(WorldDataUtil.WorldToMap);
+			float scaleY = (float)(WorldDataUtil.WorldToMap);
+
+			float scaleFactor = 0.5f;
 
 			UTexture2D? firstTileTexture = AssetUtil.LoadTexture(worldData.MinimapData!.MapTextures[0], assetFileProvider);
 			if (firstTileTexture != null)
 			{
 				scaleX = (float)firstTileTexture.SizeX / (float)WorldDataUtil.WorldTileSize;
 				scaleY = (float)firstTileTexture.SizeY / (float)WorldDataUtil.WorldTileSize;
+				scaleFactor = (float)firstTileTexture.SizeX / (float)WorldDataUtil.MapCellSize * 0.25f;
 			}
 
 			int imageWidth = (int)Math.Ceiling(mapWidth * scaleX);
 			int imageHeight = (int)Math.Ceiling(mapHeight * scaleY);
 
-			return new MapOverlayBuilder(offsetX, offsetY, imageWidth, imageHeight, scaleX, scaleY);
+			  return new MapOverlayBuilder(offsetX, offsetY, imageWidth, imageHeight, scaleX, scaleY, scaleFactor);
 		}
 
 		/// <summary>
@@ -176,12 +178,17 @@ namespace IcarusDataMiner
 					canvas.DrawPoint(mMapWidth - 0.5f, mMapHeight - 0.5f, anchorPaint);
 				}
 
+				using SKPaint iconPaint = new()
+				{
+					FilterQuality = SKFilterQuality.High
+				};
+
 				SKMatrix baseMatrix = canvas.TotalMatrix;
 				foreach (LocationCollection collection in mLocationCollections)
 				{
 					if (collection.Icon is null)
 					{
-						float sizeScale = (mWorldToMapX + mWorldToMapY) * MapScaleFactor;
+						float sizeScale = mMapScaleFactor;
 
 						using SKPaint paint = new()
 						{
@@ -241,8 +248,8 @@ namespace IcarusDataMiner
 					}
 					else
 					{
-						int iconWidth = (int)Math.Round(collection.Icon.Width * (mWorldToMapX * MapScaleFactor) * 0.5f);
-						int iconHeight = (int)Math.Round(collection.Icon.Height * (mWorldToMapY * MapScaleFactor) * 0.5f);
+						int iconWidth = (int)Math.Round(32.0f * mMapScaleFactor);
+						int iconHeight = (int)Math.Round(32.0f * mMapScaleFactor);
 
 						float halfIconWidth = iconWidth * 0.5f;
 						float halfIconHeight = iconHeight * 0.5f;
@@ -263,7 +270,7 @@ namespace IcarusDataMiner
 							transform = transform.PreConcat(SKMatrix.CreateScale(iconScaleX, iconScaleY));
 							canvas.SetMatrix(transform);
 
-							canvas.DrawImage(collection.Icon, SKPoint.Empty);
+							canvas.DrawImage(collection.Icon, SKPoint.Empty, iconPaint);
 						}
 					}
 					canvas.SetMatrix(baseMatrix);
