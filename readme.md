@@ -1,6 +1,6 @@
-Command line program to extra data from the game Icarus: First Cohort. This is mainly just for my own use to update data each week when the game updates.
+Command line program to extra data from the survival game Icarus.
 
-I use the output of this to update various Google sheets located in [this folder](https://drive.google.com/drive/u/0/folders/1u5mE7nfmRmxpvYBbmeWl1gAIoOxvmtRE).
+This is mainly just for my own use and is also used in some capacity to inform the [Icarus Intel](https://icarusintel.com) interactive map..
 
 ## Usage
 
