@@ -401,7 +401,8 @@ namespace IcarusDataMiner
 		Jog,
 		Run,
 		Sprint,
-		Attacking
+		Attacking,
+		Following
 	}
 
 	internal struct FMovementStateData
