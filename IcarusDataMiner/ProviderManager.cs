@@ -55,7 +55,7 @@ namespace IcarusDataMiner
 			InitializeProvider(mDataProvider);
 			InitializeProvider(mAssetProvider);
 
-			mWorldDataUtil = LoadWorldData();
+			mWorldDataUtil = LoadWorldData(logger);
 			if (mWorldDataUtil == null)
 			{
 				logger.Log(LogLevel.Error, "Failed to load world data from D_WorldData.json in data.pak");
@@ -108,10 +108,12 @@ namespace IcarusDataMiner
 			provider.LoadLocalization(ELanguage.English);
 		}
 
-		private WorldDataUtil? LoadWorldData()
+		private WorldDataUtil? LoadWorldData(Logger logger)
 		{
 			GameFile file = mDataProvider.Files["World/D_WorldData.json"];
-			return (WorldDataUtil?)JsonConvert.DeserializeObject(Encoding.UTF8.GetString(file.Read()), typeof(WorldDataUtil), new FVector2DJsonConverter(), new FVectorJsonConverter());
+			WorldDataUtil? instance = (WorldDataUtil?)JsonConvert.DeserializeObject(Encoding.UTF8.GetString(file.Read()), typeof(WorldDataUtil), new FVector2DJsonConverter(), new FVectorJsonConverter());
+			instance?.ComputeMapTiles(logger);
+			return instance;
 		}
 	}
 }

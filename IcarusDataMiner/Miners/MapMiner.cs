@@ -60,28 +60,15 @@ namespace IcarusDataMiner.Miners
 			IList<string> texturePaths = worldData.MinimapData.MapTextures;
 			if (texturePaths.Count == 0) return null;
 
+			if (worldData.TileRowCount == 0 || worldData.TileColumnCount == 0) return null;
+
 			List<Tile> tiles = new();
 
-			int rows, cols;
+			for (int x = 0; x < worldData.TileRowCount; ++x)
 			{
-				float worldWidth = worldData.MinimapData.WorldBoundaryMax.X - worldData.MinimapData.WorldBoundaryMin.X;
-				float worldHeight = worldData.MinimapData.WorldBoundaryMax.Y - worldData.MinimapData.WorldBoundaryMin.Y;
-
-				cols = (int)(worldWidth / WorldDataUtil.WorldTileSize);
-				rows = (int)(worldHeight / WorldDataUtil.WorldTileSize);
-			}
-
-			if (cols * rows > texturePaths.Count)
-			{
-				logger.Log(LogLevel.Warning, $"Map '{worldData.Name}' does not appear to contain enough map tiles. Expected: {cols * rows}, Found: {texturePaths.Count}");
-				return null;
-			}
-
-			for (int x = 0; x < rows; ++x)
-			{
-				for (int y = 0; y < cols; ++y)
+				for (int y = 0; y < worldData.TileColumnCount; ++y)
 				{
-					string rawPath = texturePaths[y + x * rows];
+					string rawPath = texturePaths[y + x * worldData.TileRowCount];
 					SKBitmap? bitmap = AssetUtil.LoadAndDecodeTexture(worldData.Name, rawPath, providerManager.AssetProvider, logger);
 					if (bitmap == null) continue;
 

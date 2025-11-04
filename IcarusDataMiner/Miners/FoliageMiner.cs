@@ -223,19 +223,13 @@ namespace IcarusDataMiner.Miners
 				FindFoliage(packageFile, FVector.ZeroVector, foliageData, meshMap, worldData, providerManager, logger);
 			}
 
-			int rows, cols;
-			{
-				float worldWidth = worldData.MinimapData!.WorldBoundaryMax.X - worldData.MinimapData!.WorldBoundaryMin.X;
-				float worldHeight = worldData.MinimapData!.WorldBoundaryMax.Y - worldData.MinimapData!.WorldBoundaryMin.Y;
+			if (worldData.TileRowCount == 0 || worldData.TileColumnCount == 0) return;
 
-				cols = (int)(worldWidth / WorldDataUtil.WorldTileSize);
-				rows = (int)(worldHeight / WorldDataUtil.WorldTileSize);
-			}
-			for (int x = 0; x < rows; ++x)
+			for (int x = 0; x < worldData.TileRowCount; ++x)
 			{
-				for (int y = 0; y < cols; ++y)
+				for (int y = 0; y < worldData.TileColumnCount; ++y)
 				{
-					string packagePath = WorldDataUtil.GetPackageName(worldData.HeightmapLevels[y + x * cols]);
+					string packagePath = WorldDataUtil.GetPackageName(worldData.HeightmapLevels[y + x * worldData.TileColumnCount]);
 
 					GameFile? packageFile;
 					if (!providerManager.AssetProvider.Files.TryGetValue(packagePath, out packageFile)) continue;

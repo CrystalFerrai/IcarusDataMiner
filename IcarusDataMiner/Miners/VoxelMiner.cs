@@ -92,7 +92,11 @@ namespace IcarusDataMiner.Miners
 			}
 
 			ExportData(mapAsset.NameWithoutExtension, voxelMap, config, logger);
-			ExportImages(mapAsset.NameWithoutExtension, providerManager, worldData, voxelMap, config, logger);
+
+			if (worldData.TileRowCount > 0 && worldData.TileColumnCount > 0)
+			{
+				ExportImages(mapAsset.NameWithoutExtension, providerManager, worldData, voxelMap, config, logger);
+			}
 		}
 
 		private void ExportData(string mapName, Dictionary<string, List<FVector>> voxelMap, Config config, Logger logger)
