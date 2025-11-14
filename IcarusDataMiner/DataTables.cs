@@ -13,12 +13,8 @@
 // limitations under the License.
 
 using CUE4Parse.FileProvider;
-using CUE4Parse.UE4.Assets.Exports.Texture;
-using CUE4Parse.UE4.Objects.Core.i18N;
 using CUE4Parse.UE4.Objects.Core.Math;
-using CUE4Parse.UE4.Objects.UObject;
 using Newtonsoft.Json.Linq;
-using System.Diagnostics.CodeAnalysis;
 using System.Text;
 
 namespace IcarusDataMiner
@@ -28,6 +24,8 @@ namespace IcarusDataMiner
 	/// </summary>
 	internal class DataTables
 	{
+		public IcarusDataTable<FIcarusProspect>? ProspectsTable { get; set; }
+
 		public IcarusDataTable<FIcarusTerrain>? TerrainsTable { get; private set; }
 
 		public IcarusDataTable<FIcarusAtmosphere>? AtmospheresTable { get; private set; }
@@ -58,6 +56,7 @@ namespace IcarusDataMiner
 		{
 			return new()
 			{
+				ProspectsTable = LoadDataTable<FIcarusProspect>(provider, "Prospects/D_ProspectList.json"),
 				TerrainsTable = LoadDataTable<FIcarusTerrain>(provider, "Prospects/D_Terrains.json"),
 				AtmospheresTable = LoadDataTable<FIcarusAtmosphere>(provider, "Prospects/D_Atmospheres.json"),
 				ItemTemplateTable = LoadDataTable<FItemData>(provider, "Items/D_ItemTemplate.json"),
@@ -123,6 +122,51 @@ namespace IcarusDataMiner
 	}
 
 #pragma warning disable CS0649 // Field never assigned to
+
+	internal struct FIcarusProspect : IDataTableRow
+	{
+		public string Name { get; set; }
+		public JObject? Metadata { get; set; }
+
+		public string DropName;
+		public string DesignNotes;
+		public string Description;
+		public string FlavourText;
+		public ObjectPointer ProspectImage;
+		public Dictionary<EMissionDifficulty, FDifficultySetup> DifficultySetup;
+		public EIcarusProspectDifficulty Difficulty;
+		public FRowHandle BriefingDialogue;
+		public FRowHandle LandingDialogue;
+		public FRowHandle MissionCompleteDialogue;
+		public int RequiredLevel;
+		public EProspectRequiredTech RequiredTech;
+		public List<FRowEnum> RequiredCharacterFlags;
+		public List<FRowEnum> ForbiddenCharacterFlags;
+		public List<FRowHandle> RequiredFlags;
+		public bool bDisableWorldBosses;
+		public Dictionary<FRowHandle, FVector2D> WorldBosses;
+		public FRowHandle InitialForecast;
+		public FRowHandle Forecast;
+		public bool bDisabled;
+		public FRowHandle Terrain;
+		public FRowHandle FactionMission;
+		public bool bIsPersistent;
+		public bool bIsOpenWorld;
+		public FIcarusTimeSpan TimeDuration;
+		public int StartingTime;
+		public ObjectPointer TimeScaleCurve;
+		public List<FRowHandle> AdditionalRulesets;
+		public int PlayerSpawnGroupIndex;
+		public List<FMetaSpawn> MetaDepositSpawns;
+		public FVector2D DefaultMetaResourceAmount;
+		public int NumMetaSpawnsMin;
+		public int NumMetaSpawnsMax;
+		public List<FRowHandle> WorldStatList;
+		public ObjectPointer BoundsOverride;
+		public FRowHandle AISpawnConfigOverride;
+		public bool bAbandonOnProspectExpiry;
+		public EOnProspectAvailability OnProspectAvailability;
+	};
 
 	internal struct FIcarusTerrain : IDataTableRow
 	{
@@ -321,6 +365,68 @@ namespace IcarusDataMiner
 		public bool bIsWorldStat;
 		public FRowHandle StatCategory;
 		public bool bHideStatInUserInterface;
+	}
+
+	internal struct FDifficultySetup
+	{
+		public List<FRowHandle> DifficultyStats;
+		public FRowHandle Forecast;
+	}
+
+	internal struct FIcarusTimeSpan
+	{
+		public FIcarusIntRange Days;
+		public FIcarusIntRange Hours;
+		public FIcarusIntRange Mins;
+		public FIcarusIntRange Seconds;
+	}
+
+	internal struct FMetaSpawn
+	{
+		public FRowEnum SpawnLocation;
+		public int MinMetaAmount;
+		public int MaxMetaAmount;
+	}
+
+	internal struct FIcarusIntRange
+	{
+		public int Min;
+		public int Max;
+	}
+
+	internal enum EMissionDifficulty
+	{
+		None,
+		Easy,
+		Medium,
+		Hard,
+		Extreme
+	}
+
+	internal enum EIcarusProspectDifficulty
+	{
+		Easy,
+		Normal,
+		Hard,
+		Extreme
+	}
+
+	internal enum EProspectRequiredTech
+	{
+		None,
+		Tier1,
+		Tier2,
+		Tier3,
+		Tier4
+	}
+
+	internal enum EOnProspectAvailability
+	{
+		None,
+		Base,
+		Upgrade1,
+		Upgrade2,
+		Upgrade3
 	}
 
 	internal struct FWorkshopCost

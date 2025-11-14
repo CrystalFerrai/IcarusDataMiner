@@ -637,6 +637,11 @@ namespace IcarusDataMiner
 
 			string assetPath = mPath;
 
+			if (assetPath.StartsWith("/Script/", StringComparison.OrdinalIgnoreCase))
+			{
+				return assetPath;
+			}
+
 			if (assetPath.StartsWith("/Game/", StringComparison.OrdinalIgnoreCase))
 			{
 				assetPath = $"Icarus/Content/{assetPath.Substring(6)}";

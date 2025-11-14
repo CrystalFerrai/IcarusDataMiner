@@ -1453,6 +1453,27 @@ namespace IcarusDataMiner
 			Assembly = assembly;
 		}
 
+		public IEnumerable<Operation> GetFlattenedOperations(int depth = -1)
+		{
+			return GetFlattenedOperationsImpl(Script, 0, depth);
+		}
+
+		private static IEnumerable<Operation> GetFlattenedOperationsImpl(IReadOnlyList<Operation> list, int currentDepth, int maxDepth)
+		{
+			foreach (Operation op in list)
+			{
+				yield return op;
+				if (maxDepth < 0 || currentDepth < maxDepth)
+				{
+					++currentDepth;
+					foreach (Operation subOp in GetFlattenedOperationsImpl(op.ChildOperations, currentDepth, maxDepth))
+					{
+						yield return subOp;
+					}
+				}
+			}
+		}
+
 		public override string ToString()
 		{
 			return Assembly;
