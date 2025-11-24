@@ -94,7 +94,7 @@ namespace IcarusDataMiner.Miners
 
 		private void OutputOverlay(WorldData worldData, IEnumerable<DropZone> dropZones, IProviderManager providerManager, string outputDirectory, Logger logger)
 		{
-			FVector textOffest = new(0.0f, 2500.0f, 0.0f);
+			FVector textOffest = new(0.0f, 3000.0f, 0.0f);
 
 			List<DropZone> zones = new();
 			List<DropZone> selectableZones = new();
@@ -127,8 +127,8 @@ namespace IcarusDataMiner.Miners
 				overlayBuilder.AddLocations(new AreaMapLocation(defaultZone.Center, DropZone.InnerRadius).AsEnumerable(), sDefaultAreaColor);
 			}
 
-			overlayBuilder.AddLocations(dropZones.Select(z => new TextMapLocation(z.Center - textOffest, z.Index.ToString())), 28.0f, SKColors.Black);
-			overlayBuilder.AddLocations(dropZones.Select(z => new TextMapLocation(z.Center + textOffest, z.Name!)), 16.0f, SKColors.Black);
+			overlayBuilder.AddLocations(dropZones.Select(z => new TextMapLocation(z.Center - 200.0f - textOffest, z.Index.ToString())), 60.0f, SKColors.Black);
+			overlayBuilder.AddLocations(dropZones.Select(z => new TextMapLocation(z.Center - 200.0f + textOffest, z.Name!)), 40.0f, SKColors.Black);
 
 			SKData outData = overlayBuilder.DrawOverlay();
 
