@@ -79,18 +79,18 @@ namespace IcarusDataMiner.Miners
 				List<AISpawnZone> spawnZones = new();
 				Dictionary<int, CompositeSpawnZone> compositeZoneMap = new();
 
-				char nextCompositeId = 'A';
+				int nextCompositeId = 1;
 
 				foreach (FAISpawnZoneSetup zoneSetup in row.SpawnZones)
 				{
 					FAISpawnZones zone = spawnZoneTable[zoneSetup.SpawnZone.RowName];
 
 					List<WeightedItem> creatures = new();
-					if (zone.Creatures.SpawnList is not null)
+					if (zone.Creatures.AISpawnList is not null)
 					{
-						foreach (var creatureSpawnPair in zone.Creatures.SpawnList)
+						foreach (FAISpawnListItemData spawnListItem in zone.Creatures.AISpawnList)
 						{
-							creatures.Add(new WeightedItem(getCreatureName(creatureSpawnPair.Key)!, creatureSpawnPair.Value));
+							creatures.Add(new WeightedItem(getCreatureName(spawnListItem.AISetup)!, spawnListItem.SpawnWeight));
 						}
 					}
 					creatures.Sort();
@@ -122,15 +122,6 @@ namespace IcarusDataMiner.Miners
 					}
 					else
 					{
-						if (nextCompositeId > 'Z')
-						{
-							// 0 looks like O, so skip it
-							nextCompositeId = '1';
-						}
-						if (nextCompositeId > '9' && nextCompositeId < 'A')
-						{
-							throw new NotImplementedException("Too many composites for single letter names. Need to expand this.");
-						}
 						compositeZone = new(nextCompositeId.ToString(), newSpawnZone);
 						compositeZoneMap.Add(creatureHash, compositeZone);
 						++nextCompositeId;
@@ -510,9 +501,17 @@ namespace IcarusDataMiner.Miners
 
 		private struct FBiomeAISpawnData
 		{
-			public Dictionary<FRowEnum, int> SpawnList;
+			public List<FAISpawnListItemData> AISpawnList;
+			public Dictionary<FRowEnum, FAISpawnListItemData> WorldStatInjection;
 			public int BiomeSpawnDensity;
 			public List<FRowHandle> RelevantAutonomousSpawners;
+		}
+
+		private struct FAISpawnListItemData
+		{
+			public FRowEnum AISetup;
+			public int SpawnWeight;
+			public FRowEnum EpicCreature;
 		}
 
 		private struct FAutonomousSpawnData : IDataTableRow

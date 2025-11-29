@@ -34,6 +34,7 @@ namespace IcarusDataMiner.Miners
 		protected static readonly SKTypeface BodyTypeFace = SKTypeface.FromFamilyName("Segoe UI", SKFontStyleWeight.Normal, SKFontStyleWidth.Normal, SKFontStyleSlant.Upright);
 		protected static readonly SKTypeface BodyBoldTypeFace = SKTypeface.FromFamilyName("Segoe UI", SKFontStyleWeight.Bold, SKFontStyleWidth.Normal, SKFontStyleSlant.Upright);
 		protected const float BodyTextSize = 14.0f;
+		protected const float BodyCenterTextSize = 12.0f;
 
 		protected readonly SKPaint mTitlePaint;
 		protected readonly SKPaint mTitlePaintNegative;
@@ -87,9 +88,11 @@ namespace IcarusDataMiner.Miners
 			mBodyBoldPaintNegative.Color = ForegroundColorNegative;
 
 			mBodyBoldCenterPaint = mBodyBoldPaint.Clone();
+			mBodyBoldCenterPaint.TextSize = BodyCenterTextSize;
 			mBodyBoldCenterPaint.TextAlign = SKTextAlign.Center;
 
 			mBodyBoldCenterPaintNegative = mBodyBoldPaintNegative.Clone();
+			mBodyBoldCenterPaintNegative.TextSize = BodyCenterTextSize;
 			mBodyBoldCenterPaintNegative.TextAlign = SKTextAlign.Center;
 
 			mNameCirclePaint = new()
