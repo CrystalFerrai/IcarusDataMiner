@@ -15,6 +15,7 @@
 using CUE4Parse.FileProvider;
 using CUE4Parse.UE4.Objects.Core.Math;
 using Newtonsoft.Json.Linq;
+using System.Diagnostics.CodeAnalysis;
 using System.Text;
 
 namespace IcarusDataMiner
@@ -24,7 +25,15 @@ namespace IcarusDataMiner
 	/// </summary>
 	internal class DataTables
 	{
+		private readonly Dictionary<string, IcarusDataTable> mTableNameMap;
+
+		public IcarusDataTable<FTalent>? TalentsTable { get; set; }
+
+		public IcarusDataTable<FTalentTree>? TalentTreesTable { get; set; }
+
 		public IcarusDataTable<FIcarusProspect>? ProspectsTable { get; set; }
+
+		public IcarusDataTable<FGreatHunt>? GreatHuntsTable { get; set; }
 
 		public IcarusDataTable<FIcarusTerrain>? TerrainsTable { get; private set; }
 
@@ -50,25 +59,39 @@ namespace IcarusDataMiner
 
 		private DataTables()
 		{
+			mTableNameMap = new();
 		}
 
 		public static DataTables Load(IFileProvider provider, Logger logger)
 		{
-			return new()
+			DataTables instance = new();
+			instance.TalentsTable = instance.InternalLoadDataTable<FTalent>(provider, "Talents/D_Talents.json");
+			instance.TalentTreesTable = instance.InternalLoadDataTable<FTalentTree>(provider, "Talents/D_TalentTrees.json");
+			instance.ProspectsTable = instance.InternalLoadDataTable<FIcarusProspect>(provider, "Prospects/D_ProspectList.json");
+			instance.GreatHuntsTable = instance.InternalLoadDataTable<FGreatHunt>(provider, "GreatHunt/D_GreatHunts.json");
+			instance.TerrainsTable = instance.InternalLoadDataTable<FIcarusTerrain>(provider, "Prospects/D_Terrains.json");
+			instance.AtmospheresTable = instance.InternalLoadDataTable<FIcarusAtmosphere>(provider, "Prospects/D_Atmospheres.json");
+			instance.ItemTemplateTable = instance.InternalLoadDataTable<FItemData>(provider, "Items/D_ItemTemplate.json");
+			instance.ItemStaticTable = instance.InternalLoadDataTable<FItemStaticData>(provider, "Items/D_ItemsStatic.json");
+			instance.ItemableTable = instance.InternalLoadDataTable<FItemableData>(provider, "Traits/D_Itemable.json");
+			instance.ItemRewardsTable = instance.InternalLoadDataTable<FItemRewards>(provider, "Items/D_ItemRewards.json");
+			instance.WorkshopItemTable = instance.InternalLoadDataTable<FWorkshopItem>(provider, "MetaWorkshop/D_WorkshopItems.json");
+			instance.BreakableRockTable = instance.InternalLoadDataTable<FBreakableRockData>(provider, "World/D_BreakableRockData.json");
+			instance.AISetupTable = instance.InternalLoadDataTable<FAISetup>(provider, "AI/D_AISetup.json");
+			instance.AICreatureTypeTable = instance.InternalLoadDataTable<FAICreatureType>(provider, "AI/D_AICreatureType.json");
+			instance.StatsTable = instance.InternalLoadDataTable<FIcarusStatDescription>(provider, "Stats/D_Stats.json");
+			return instance;
+		}
+
+		public bool TryResolveHandle<T>(FRowHandle handle, [NotNullWhen(true)] out T? row) where T : IDataTableRow
+		{
+			if (mTableNameMap.TryGetValue(handle.DataTableName, out IcarusDataTable? table) && table is IcarusDataTable<T> tt)
 			{
-				ProspectsTable = LoadDataTable<FIcarusProspect>(provider, "Prospects/D_ProspectList.json"),
-				TerrainsTable = LoadDataTable<FIcarusTerrain>(provider, "Prospects/D_Terrains.json"),
-				AtmospheresTable = LoadDataTable<FIcarusAtmosphere>(provider, "Prospects/D_Atmospheres.json"),
-				ItemTemplateTable = LoadDataTable<FItemData>(provider, "Items/D_ItemTemplate.json"),
-				ItemStaticTable = LoadDataTable<FItemStaticData>(provider, "Items/D_ItemsStatic.json"),
-				ItemableTable = LoadDataTable<FItemableData>(provider, "Traits/D_Itemable.json"),
-				ItemRewardsTable = LoadDataTable<FItemRewards>(provider, "Items/D_ItemRewards.json"),
-				WorkshopItemTable = LoadDataTable<FWorkshopItem>(provider, "MetaWorkshop/D_WorkshopItems.json"),
-				BreakableRockTable = LoadDataTable<FBreakableRockData>(provider, "World/D_BreakableRockData.json"),
-				AISetupTable = LoadDataTable<FAISetup>(provider, "AI/D_AISetup.json"),
-				AICreatureTypeTable = LoadDataTable<FAICreatureType>(provider, "AI/D_AICreatureType.json"),
-				StatsTable = LoadDataTable<FIcarusStatDescription>(provider, "Stats/D_Stats.json")
-			};
+				row = tt[handle.RowName];
+				return true;
+			}
+			row = default;
+			return false;
 		}
 
 		public FItemableData GetItemableData(FItemData item)
@@ -119,9 +142,53 @@ namespace IcarusDataMiner
 			string tableName = Path.GetFileNameWithoutExtension(path);
 			return IcarusDataTable<T>.DeserializeTable(tableName, Encoding.UTF8.GetString(file.Read()));
 		}
+
+		private IcarusDataTable<T> InternalLoadDataTable<T>(IFileProvider provider, string path) where T : IDataTableRow
+		{
+			string tableName = Path.GetFileNameWithoutExtension(path);
+			IcarusDataTable<T> table = LoadDataTable<T>(provider, path);
+			mTableNameMap[tableName] = table;
+			return table;
+		}
 	}
 
 #pragma warning disable CS0649 // Field never assigned to
+
+	internal struct FTalent : IDataTableRow
+	{
+		public string Name { get; set; }
+		public JObject? Metadata { get; set; }
+
+		public ETalentNodeType TalentType;
+		public string DisplayName;
+		public string Description;
+		public ObjectPointer Icon;
+		public FRowHandle ExtraData;
+		public FRowHandle TalentTree;
+		public FVector2D Position;
+		public FVector2D Size;
+		public List<FTalentReward> Rewards;
+		public List<FRowHandle> RequiredTalents;
+		public List<FRowHandle> RequiredFlags;
+		public List<FRowHandle> ForbiddenFlags;
+		public FRowHandle RequiredRank;
+		public int RequiredLevel;
+		public bool bDefaultUnlocked;
+		public ELineDrawMethod DrawMethodOverride;
+	}
+
+	internal struct FTalentTree : IDataTableRow
+	{
+		public string Name { get; set; }
+		public JObject? Metadata { get; set; }
+
+		public string DisplayName;
+		public ObjectPointer BackgroundTexture;
+		public ObjectPointer Icon;
+		public FRowHandle Archetype;
+		public FRowHandle FirstRank;
+		public int RequiredLevel;
+	}
 
 	internal struct FIcarusProspect : IDataTableRow
 	{
@@ -166,7 +233,19 @@ namespace IcarusDataMiner
 		public FRowHandle AISpawnConfigOverride;
 		public bool bAbandonOnProspectExpiry;
 		public EOnProspectAvailability OnProspectAvailability;
-	};
+	}
+
+	internal struct FGreatHunt : IDataTableRow
+	{
+		public string Name { get; set; }
+		public JObject? Metadata { get; set; }
+
+		public FRowHandle Hunt;
+		public FRowHandle Prospect;
+		public List<FRowHandle> ForbiddenTalent;
+		public EGreatHuntMissionType Type;
+		public Dictionary<FRowEnum, int> WorldStats;
+	}
 
 	internal struct FIcarusTerrain : IDataTableRow
 	{
@@ -367,6 +446,28 @@ namespace IcarusDataMiner
 		public bool bHideStatInUserInterface;
 	}
 
+	internal enum ETalentNodeType
+	{
+		Talent,
+		Reroute,
+		MutuallyExclusive
+	}
+
+	internal struct FTalentReward
+	{
+		public Dictionary<FRowEnum, int> GrantedStats;
+		public List<FRowHandle> GrantedFlags;
+	}
+
+	internal enum ELineDrawMethod
+	{
+		Unspecified,
+		NoLine,
+		ShortestDistance,
+		XThenY,
+		YThenX,
+	}
+
 	internal struct FDifficultySetup
 	{
 		public List<FRowHandle> DifficultyStats;
@@ -427,6 +528,15 @@ namespace IcarusDataMiner
 		Upgrade1,
 		Upgrade2,
 		Upgrade3
+	}
+
+	internal enum EGreatHuntMissionType
+	{
+		None,
+		Standard,
+		Choice,
+		Optional,
+		Final
 	}
 
 	internal struct FWorkshopCost
@@ -497,6 +607,15 @@ namespace IcarusDataMiner
 	{
 		public string TagName; // Actual type is FName, but stored in json files as a string
 	}
+
+	internal struct FGameplayTagQuery
+	{
+		public int TokenStreamVersion;
+		public List<FGameplayTag> TagDictionary;
+		public List<byte> QueryTokenStream;
+		public string UserDescription;
+		public string AutoDescription;
+	};
 
 	internal enum EMovementState
 	{

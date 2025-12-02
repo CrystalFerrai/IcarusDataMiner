@@ -55,7 +55,7 @@ namespace IcarusDataMiner.Miners
 			ProspectForecastTable? forecasts = LoadJsonAsset<ProspectForecastTable>("Weather/D_ProspectForecast.json", providerManager.DataProvider);
 			if (forecasts?.Rows == null) throw new DataMinerException("Error reading prospect forecast table");
 
-			HashSet<string> activeForecasts = new HashSet<string>(providerManager.ProspectDataUtil.ProspectsByTier.Values.SelectMany(l => l.Where(p => p.Forecast != null).Select(p => p.Forecast!)));
+			HashSet<string> activeForecasts = new(providerManager.ProspectDataUtil.AvailableProspects.Select(p => p.Prospect.Forecast.RowName));
 
 			ExportLegend(tierIcons, providerManager, config, logger);
 			ExportForecasts(forecasts, activeForecasts, tierIcons, providerManager, config, logger);

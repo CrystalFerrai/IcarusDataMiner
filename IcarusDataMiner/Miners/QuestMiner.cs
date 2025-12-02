@@ -14,7 +14,12 @@
 
 using CUE4Parse.FileProvider;
 using CUE4Parse.UE4.Assets;
+using CUE4Parse.UE4.Assets.Exports;
+using CUE4Parse.UE4.Assets.Objects;
+using CUE4Parse.UE4.Objects.Core.Math;
+using CUE4Parse.UE4.Objects.Engine;
 using CUE4Parse.UE4.Objects.UObject;
+using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
 namespace IcarusDataMiner.Miners
@@ -28,31 +33,121 @@ namespace IcarusDataMiner.Miners
 			IcarusDataTable<FFactionMission> missionsTable = DataTables.LoadDataTable<FFactionMission>(providerManager.DataProvider, "Factions/D_FactionMissions.json");
 			IcarusDataTable<FQuestSetup> questsTable = DataTables.LoadDataTable<FQuestSetup>(providerManager.DataProvider, "Quests/D_Quests.json");
 
-			List<QuestData> quests = new();
-			foreach (var pair in providerManager.DataTables.ProspectsTable!)
+			logger.Log(LogLevel.Information, "Locating quest markers...");
+			IcarusDataTable<FQuestQueries> questQueriesTable = DataTables.LoadDataTable<FQuestQueries>(providerManager.DataProvider, "Quests/D_QuestQueries.json");
+			IReadOnlyDictionary<string, IList<FVector>> tagLocations = FindQuestMarkers(providerManager, logger);
+			QuestLocationQueryData locationQueryData = new(questQueriesTable, tagLocations);
+
+			logger.Log(LogLevel.Information, "Processing quests...");
+			List<QuestData> allQuests = new();
+			foreach (var pair in providerManager.ProspectDataUtil.ProspectsByTree)
 			{
-				FFactionMission mission;
-				if (!missionsTable.TryGetValue(pair.Value.FactionMission.RowName, out mission))
+				List<QuestData> quests = new();
+				foreach (ProspectData prospect in pair.Value)
 				{
-					continue;
-				}
+					FFactionMission mission;
+					if (!missionsTable.TryGetValue(prospect.Prospect.FactionMission.RowName, out mission))
+					{
+						continue;
+					}
 
-				QuestData quest = QuestData.Create(pair.Value);
+					QuestData quest = QuestData.Create(prospect.Prospect);
 
-				ProcessQuest(ref quest, questsTable[mission.InitialQuest.RowName], questsTable, providerManager, logger);
-				foreach (FMissionObjectiveEntry subMission in mission.MissionObjectives)
-				{
-					ProcessQuest(ref quest, questsTable[subMission.QuestRow.RowName], questsTable, providerManager, logger);
+					ProcessQuest(quest, questsTable[mission.InitialQuest.RowName], questsTable, locationQueryData, providerManager, logger);
+					foreach (FMissionObjectiveEntry subMission in mission.MissionObjectives)
+					{
+						FQuestSetup questSetup = questsTable[subMission.QuestRow.RowName];
+						QuestData subQuest = QuestData.Create(questSetup);
+						ProcessQuest(subQuest, questSetup, questsTable, locationQueryData, providerManager, logger);
+						quest.SubQuests.Add(subQuest);
+					}
+					quests.Add(quest);
 				}
-				quests.Add(quest);
+				allQuests.AddRange(quests);
+
+				ExportQuestList(pair.Key, quests, providerManager, config, logger);
 			}
-
-			ExportQuestList(quests, providerManager, config, logger);
+			ExportPrebuiltStructures(allQuests, providerManager, config, logger);
 
 			return true;
 		}
 
-		private void ProcessQuest(ref QuestData quest, FQuestSetup questSetup, IcarusDataTable<FQuestSetup> questsTable, IProviderManager providerManager, Logger logger)
+		private IReadOnlyDictionary<string, IList<FVector>> FindQuestMarkers(IProviderManager providerManager, Logger logger)
+		{
+			Dictionary<string, IList<FVector>> tagLocations = new();
+
+			foreach (WorldData world in providerManager.WorldDataUtil.Rows)
+			{
+				if (world.MainLevel is null)
+				{
+					continue;
+				}
+
+				if (!providerManager.AssetProvider.Files.TryGetValue(WorldDataUtil.GetPackageName(world.MainLevel), out GameFile? file))
+				{
+					continue;
+				}
+
+				Package package = (Package)providerManager.AssetProvider.LoadPackage(file);
+
+				foreach (FObjectExport export in package.ExportMap)
+				{
+					if (!export.ClassName.Equals("BP_QuestMarker_C"))
+					{
+						continue;
+					}
+
+					UObject obj = export.ExportObject.Value;
+
+					FPropertyTag? tagsProperty = null;
+					FPropertyTag? rootComponentProperty = null;
+					foreach (FPropertyTag property in obj.Properties)
+					{
+						switch (property.Name.Text)
+						{
+							case "GameplayTags":
+								tagsProperty = property;
+								break;
+							case "RootComponent":
+								rootComponentProperty = property;
+								break;
+						}
+					}
+
+					if (tagsProperty is null || rootComponentProperty is null)
+					{
+						continue;
+					}
+
+					CUE4Parse.UE4.Objects.GameplayTags.FGameplayTagContainer tags = (CUE4Parse.UE4.Objects.GameplayTags.FGameplayTagContainer)((UScriptStruct)tagsProperty.Tag!.GenericValue!).StructType;
+
+					FVector location = FVector.ZeroVector;
+
+					UObject rootComponentObject = ((FPackageIndex)rootComponentProperty.Tag!.GenericValue!).ResolvedObject!.Object!.Value;
+
+					FPropertyTag? locationProperty = rootComponentObject.Properties.FirstOrDefault(p => p.Name.Text.Equals("RelativeLocation"));
+					if (locationProperty is not null)
+					{
+						location = (FVector)((UScriptStruct)locationProperty.Tag!.GenericValue!).StructType;
+					}
+
+					foreach (FName tag in tags.GameplayTags)
+					{
+						IList<FVector>? locations;
+						if (!tagLocations.TryGetValue(tag.Text, out locations))
+						{
+							locations = new List<FVector>();
+							tagLocations.Add(tag.Text, locations);
+						}
+						locations.Add(location);
+					}
+				}
+			}
+
+			return tagLocations;
+		}
+
+		private void ProcessQuest(QuestData quest, FQuestSetup questSetup, IcarusDataTable<FQuestSetup> questsTable, QuestLocationQueryData locationQueryData, IProviderManager providerManager, Logger logger)
 		{
 			string? bpPath = questSetup.Class.GetAssetPath(true);
 			if (bpPath is null)
@@ -61,12 +156,18 @@ namespace IcarusDataMiner.Miners
 				return;
 			}
 
-			ProcessQuestBlueprint(bpPath, ref quest, questsTable, providerManager, logger);
+			ProcessQuestBlueprint(bpPath, quest, questsTable, locationQueryData, providerManager, logger);
 		}
 
-		private void ProcessQuestBlueprint(string bpPath, ref QuestData quest, IcarusDataTable<FQuestSetup> questsTable, IProviderManager providerManager, Logger logger)
+		private void ProcessQuestBlueprint(string bpPath, QuestData quest, IcarusDataTable<FQuestSetup> questsTable, QuestLocationQueryData locationQueryData, IProviderManager providerManager, Logger logger)
 		{
 			IFileProvider provider = providerManager.AssetProvider;
+
+			if (bpPath.Equals("/Script/Icarus.Quest"))
+			{
+				// Reached base class
+				return;
+			}
 
 			GameFile? file;
 			provider.Files.TryGetValue(bpPath, out file);
@@ -84,13 +185,36 @@ namespace IcarusDataMiner.Miners
 			{
 				if (export is null) continue;
 
-				if (export.ExportObject.Value is UFunction function)
+				if (export.ExportObject.Value is UBlueprintGeneratedClass questClass)
+				{
+					quest.QuestClass = questClass;
+					foreach (FPropertyTag property in quest.Properties!)
+					{
+						if (property.PropertyType.Text.Equals("QuestQueriesRowHandle"))
+						{
+							string rowName = ((NameProperty)property.Tag!).Value.Text;
+							string tableName = ((NameProperty)property.Tag!).Value.Text;
+							AddQuestLocation(quest, tableName, rowName, locationQueryData, logger);
+						}
+						else if (property.PropertyType.Text.Equals("ArrayProperty") && (((ArrayProperty)property.Tag!).Value.InnerTagData?.StructType?.Equals("QuestQueriesRowHandle") ?? false))
+						{
+							foreach (FPropertyTagType item in ((ArrayProperty)property.Tag!).Value.Properties)
+							{
+								FStructFallback itemData = (FStructFallback)((UScriptStruct)item.GenericValue!).StructType;
+								string rowName = ((NameProperty)itemData.Properties[1].Tag!).Value.Text;
+								string tableName = ((NameProperty)itemData.Properties[2].Tag!).Value.Text;
+								AddQuestLocation(quest, tableName, rowName, locationQueryData, logger);
+							}
+						}
+					}
+				}
+				else if (export.ExportObject.Value is UFunction function)
 				{
 					DisassembledFunction disassembledFunction = UFunctionDisassembler.Process(package, function);
 
 					foreach (Operation op in disassembledFunction.GetFlattenedOperations())
 					{
-						if (op.OpCode == EExprToken.FinalFunction)
+						if (op.OpCode == EExprToken.FinalFunction || op.OpCode == EExprToken.CallMath)
 						{
 							Operation<string> ffOp = (Operation<string>)op;
 							if (ffOp.Operand.Equals("Quest::RunQuest"))
@@ -98,6 +222,7 @@ namespace IcarusDataMiner.Miners
 								if (ffOp.ChildOperations[0].OpCode != EExprToken.StructConst)
 								{
 									// This means the quest to run is not hardcoded here
+									quest.SubQuests.Add(QuestData.Unknown);
 									continue;
 								}
 
@@ -105,13 +230,28 @@ namespace IcarusDataMiner.Miners
 								if (questsTable.TryGetValue(nameOp.Operand, out FQuestSetup questSetup))
 								{
 									QuestData subQuest = QuestData.Create(questSetup);
-									ProcessQuest(ref subQuest, questSetup, questsTable, providerManager, logger);
+									ProcessQuest(subQuest, questSetup, questsTable, locationQueryData, providerManager, logger);
 									quest.SubQuests.Add(subQuest);
+								}
+							}
+							else if (ffOp.Operand.Equals("IcarusQuestFunctionLibrary::GetQuestMarker"))
+							{
+								if (ffOp.ChildOperations.Count > 1 && ffOp.ChildOperations[1].OpCode == EExprToken.StructConst)
+								{
+									if (ffOp.ChildOperations[1].ChildOperations.Count < 1 || ffOp.ChildOperations[1].ChildOperations[0].OpCode != EExprToken.NameConst || ffOp.ChildOperations[1].ChildOperations[1].OpCode != EExprToken.NameConst)
+									{
+										logger.Log(LogLevel.Debug, "Unexpected value for quest query struct const");
+										continue;
+									}
+
+									Operation<string> queryRowOp = (Operation<string>)ffOp.ChildOperations[1].ChildOperations[0];
+									Operation<string> queryTableOp = (Operation<string>)ffOp.ChildOperations[1].ChildOperations[1];
+									AddQuestLocation(quest, queryTableOp.Operand, queryRowOp.Operand, locationQueryData, logger);
 								}
 							}
 							else if (ffOp.Operand.Equals("PrebuiltStructure::BuildStructure"))
 							{
-								ProcessPrebuiltStructureOperation(ffOp, ref quest, providerManager, logger);
+								ProcessPrebuiltStructureOperation(ffOp, quest, providerManager, logger);
 							}
 						}
 						else if (op.OpCode == EExprToken.Context)
@@ -122,7 +262,7 @@ namespace IcarusDataMiner.Miners
 								Operation<string> ffOp = (Operation<string>)cOp.Operand.ContextExpression;
 								if (ffOp.Operand.Equals("PrebuiltStructure::BuildStructure"))
 								{
-									ProcessPrebuiltStructureOperation(ffOp, ref quest, providerManager, logger);
+									ProcessPrebuiltStructureOperation(ffOp, quest, providerManager, logger);
 								}
 							}
 						}
@@ -133,7 +273,37 @@ namespace IcarusDataMiner.Miners
 			provider.ReadScriptData = wasReadScriptData;
 		}
 
-		private void ProcessPrebuiltStructureOperation(Operation<string> op, ref QuestData quest, IProviderManager providerManager, Logger logger)
+		private static void AddQuestLocation(QuestData quest, string tableName, string rowName, QuestLocationQueryData locationQueryData, Logger logger)
+		{
+			if (!tableName.Equals(locationQueryData.QuestQueriesTable.Name))
+			{
+				logger.Log(LogLevel.Debug, $"Unexpected quest query table name: {tableName}");
+				return;
+			}
+
+			if (!locationQueryData.QuestQueriesTable.TryGetValue(rowName, out FQuestQueries queryValue))
+			{
+				logger.Log(LogLevel.Debug, $"Could not locate quest query row: {rowName}");
+				return;
+			}
+
+			foreach (FGameplayTag tag in queryValue.Query.TagDictionary)
+			{
+				List<FVector>? list;
+				if (!quest.Locations.TryGetValue(tag.TagName, out list))
+				{
+					list = new();
+					quest.Locations.Add(tag.TagName, list);
+				}
+
+				if (locationQueryData.TagLocations.TryGetValue(tag.TagName, out IList<FVector>? values))
+				{
+					list.AddRange(values);
+				}
+			}
+		}
+
+		private void ProcessPrebuiltStructureOperation(Operation<string> op, QuestData quest, IProviderManager providerManager, Logger logger)
 		{
 			if (op.ChildOperations[0].OpCode != EExprToken.StructConst)
 			{
@@ -147,7 +317,31 @@ namespace IcarusDataMiner.Miners
 			quest.PrebuiltStructures.Add(nameOp.Operand);
 		}
 
-		private void ExportQuestList(IReadOnlyList<QuestData> quests, IProviderManager providerManager, Config config, Logger logger)
+		private void ExportQuestList(string treeName, IReadOnlyList<QuestData> quests, IProviderManager providerManager, Config config, Logger logger)
+		{
+			string outputPath = Path.Combine(config.OutputDirectory, Name, $"{treeName}.json");
+
+			using (FileStream outStream = IOUtil.CreateFile(outputPath, logger))
+			using (StreamWriter writer = new(outStream))
+			using (JsonTextWriter json = new(writer)
+			{
+				CloseOutput = false,
+				Formatting = Formatting.Indented,
+				Indentation = 2,
+				IndentChar = ' '
+			})
+			{
+				json.WriteStartObject();
+				foreach (QuestData quest in quests.OrderBy(q => q.Name))
+				{
+					json.WritePropertyName(quest.Name!);
+					quest.WriteJson(json, providerManager.AssetProvider);
+				}
+				json.WriteEndObject();
+			}
+		}
+
+		private void ExportPrebuiltStructures(IReadOnlyList<QuestData> quests, IProviderManager providerManager, Config config, Logger logger)
 		{
 			string outputPath = Path.Combine(config.OutputDirectory, Name, "PrebuiltStructures.csv");
 
@@ -162,36 +356,67 @@ namespace IcarusDataMiner.Miners
 					if (!prebuilts.Any()) continue;
 
 					string? name = null;
-					if (quest.DisplayName is not null)
+					if (quest.Description is not null)
 					{
-						name = LocalizationUtil.GetLocalizedString(providerManager.AssetProvider, quest.DisplayName);
+						name = LocalizationUtil.GetLocalizedString(providerManager.AssetProvider, quest.Description);
 					}
 
 					writer.WriteLine($"{quest.Name},{name},{string.Join('|', prebuilts)}");
 				}
 			}
 		}
+
 	}
 
-	internal struct QuestData
+	internal class QuestData
 	{
-		public string? Name;
-		public string? DisplayName;
-		public List<QuestData> SubQuests;
+		private static HashSet<string> sIgnoreProperties;
 
-		public List<string> PrebuiltStructures;
+		public static QuestData Unknown;
+
+		public string? Name { get; set; }
+		public string? Description { get; set; }
+		public List<QuestData> SubQuests { get; }
+
+		public Dictionary<string, List<FVector>> Locations { get; }
+		public List<string> PrebuiltStructures { get; }
+
+		public UBlueprintGeneratedClass? QuestClass
+		{
+			get => _questClass;
+			set
+			{
+				_questClass = value;
+				Properties = value?.ClassDefaultObject.ResolvedObject?.Object?.Value.Properties;
+			}
+		}
+		private UBlueprintGeneratedClass? _questClass;
+
+		public List<FPropertyTag>? Properties { get; private set; }
+
+		static QuestData()
+		{
+			sIgnoreProperties = new()
+			{
+				"UberGraphFrame",
+				"StatContainer",
+				"ActorState"
+			};
+			Unknown = new("Unknown", "Unknown");
+		}
 
 		public QuestData()
 		{
 			SubQuests = new();
+			Locations = new();
 			PrebuiltStructures = new();
 		}
 
-		public QuestData(string name, string displayName)
+		public QuestData(string name, string description)
 			: this()
 		{
 			Name = name;
-			DisplayName = displayName;
+			Description = description;
 		}
 
 		public static QuestData Create(FIcarusProspect prospect)
@@ -219,9 +444,105 @@ namespace IcarusDataMiner.Miners
 			}
 		}
 
+		public void WriteJson(JsonWriter writer, IFileProvider locProvider, bool isSubQuest = false)
+		{
+			writer.WriteStartObject();
+
+			if (isSubQuest)
+			{
+				writer.WritePropertyName(nameof(Name));
+				writer.WriteValue(Name);
+			}
+
+			writer.WritePropertyName(nameof(Description));
+			if (Description is null)
+			{
+				writer.WriteNull();
+			}
+			else
+			{
+				writer.WriteValue(LocalizationUtil.GetLocalizedString(locProvider, Description));
+			}
+
+			WriteProperties(writer);
+
+			WriteLocations(writer);
+
+			if (SubQuests.Count > 0)
+			{
+				writer.WritePropertyName(nameof(SubQuests));
+				writer.WriteStartArray();
+				foreach (QuestData subQuest in SubQuests)
+				{
+					subQuest.WriteJson(writer, locProvider, true);
+				}
+				writer.WriteEndArray();
+			}
+
+			writer.WriteEndObject();
+		}
+
+		private void WriteProperties(JsonWriter writer)
+		{
+			if (Properties is not null)
+			{
+				JsonSerializer serializer = new() { NullValueHandling = NullValueHandling.Include };
+
+				IEnumerable<FPropertyTag> props = Properties.Where(p => !sIgnoreProperties.Contains(p.Name.Text));
+				if (props.Any())
+				{
+					writer.WritePropertyName("Properties");
+					writer.WriteStartObject();
+					foreach (FPropertyTag prop in props)
+					{
+						writer.WritePropertyName(prop.Name.Text);
+						serializer.Serialize(writer, prop.Tag);
+					}
+					writer.WriteEndObject();
+				}
+			}
+		}
+
+		private void WriteLocations(JsonWriter writer)
+		{
+			if (Locations.Count == 0)
+			{
+				return;
+			}
+
+			JsonSerializer serializer = new() { NullValueHandling = NullValueHandling.Include };
+
+			writer.WritePropertyName(nameof(Locations));
+			writer.WriteStartObject();
+			foreach (var pair in Locations)
+			{
+				writer.WritePropertyName(pair.Key);
+				writer.WriteStartArray();
+				foreach (FVector location in pair.Value)
+				{
+					serializer.Serialize(writer, location);
+				}
+				writer.WriteEndArray();
+			}
+			writer.WriteEndObject();
+		}
+
 		public override string? ToString()
 		{
 			return Name;
+		}
+	}
+
+	internal class QuestLocationQueryData
+	{
+		public IcarusDataTable<FQuestQueries> QuestQueriesTable { get; }
+
+		public IReadOnlyDictionary<string, IList<FVector>> TagLocations { get; }
+
+		public QuestLocationQueryData(IcarusDataTable<FQuestQueries> questQueriesTable, IReadOnlyDictionary<string, IList<FVector>> tagLocations)
+		{
+			QuestQueriesTable = questQueriesTable;
+			TagLocations = tagLocations;
 		}
 	}
 
@@ -265,6 +586,14 @@ namespace IcarusDataMiner.Miners
 		public bool bPlayAudioCueOnCompletion;
 		public List<FRowHandle> Modifiers;
 		public bool bPreloadQuestClass;
+	};
+
+	internal struct FQuestQueries : IDataTableRow
+	{
+		public string Name { get; set; }
+		public JObject? Metadata { get; set; }
+
+		public FGameplayTagQuery Query;
 	};
 
 	internal struct FMissionObjectiveEntry

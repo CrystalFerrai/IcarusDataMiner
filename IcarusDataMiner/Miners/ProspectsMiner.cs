@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+using CUE4Parse.FileProvider;
+
 namespace IcarusDataMiner.Miners
 {
 	/// <summary>
@@ -29,39 +31,45 @@ namespace IcarusDataMiner.Miners
 
 		private void ExportProspectList(IProviderManager providerManager, Config config, Logger logger)
 		{
-			string outputPath = Path.Combine(config.OutputDirectory, $"{Name}.csv");
-
-			List<string> tiers = new List<string>(providerManager.ProspectDataUtil.ProspectsByTier.Keys);
-			tiers.Sort();
-
-			using (FileStream outStream = IOUtil.CreateFile(outputPath, logger))
-			using (StreamWriter writer = new StreamWriter(outStream))
+			foreach (var pair in providerManager.ProspectDataUtil.ProspectsByTree)
 			{
-				writer.WriteLine("ID,Talent,Name,Duration,Forecast,NodeCount,NodeIds,NodeAmount");
+				string outputPath = Path.Combine(config.OutputDirectory, Name, $"{pair.Key}.csv");
 
-				foreach (string tier in tiers)
+				using (FileStream outStream = IOUtil.CreateFile(outputPath, logger))
+				using (StreamWriter writer = new(outStream))
 				{
-					foreach (ProspectData prospect in providerManager.ProspectDataUtil.ProspectsByTier[tier])
+					writer.WriteLine("ID,Talent,Name,Duration,Forecast,NodeCount,NodeIds,NodeAmount");
+
+					foreach (ProspectData prospect in pair.Value)
 					{
-						writer.WriteLine(SerializeProspect(prospect));
+						writer.WriteLine(SerializeProspect(providerManager.AssetProvider, prospect));
 					}
 				}
 			}
 		}
 
-		private static string SerializeProspect(ProspectData prospect)
+		private static string SerializeProspect(IFileProvider locProvider, ProspectData prospect)
 		{
-			int countMin = Math.Min(prospect.NodeCountMin, prospect.Nodes.Count);
-			int countMax = Math.Min(prospect.NodeCountMax, prospect.Nodes.Count);
-			int amountMin = prospect.NodeAmountMin == int.MaxValue ? 0 : prospect.NodeAmountMin;
-			int amountMax = prospect.NodeAmountMax == int.MinValue ? 0 : prospect.NodeAmountMax;
+			int countMin = Math.Min(prospect.Prospect.NumMetaSpawnsMin, prospect.Prospect.MetaDepositSpawns.Count);
+			int countMax = Math.Min(prospect.Prospect.NumMetaSpawnsMax, prospect.Prospect.MetaDepositSpawns.Count);
+			int amountMin = prospect.Prospect.NumMetaSpawnsMin;
+			int amountMax = prospect.Prospect.NumMetaSpawnsMax;
 
 			// Weird format so that Excel won't interpret the field as a date
 			string nodeCount = countMin == countMax ? countMin.ToString() : $"\"=\"\"{countMin}-{countMax}\"\"\"";
 			string nodeAmount = amountMin == amountMax ? amountMin.ToString() : $"\"=\"\"{amountMin}-{amountMax}\"\"\"";
-			string nodeList = $"\"{string.Join(", ", prospect.Nodes)}\"";
+			string nodeList = $"\"{string.Join(", ", prospect.Prospect.MetaDepositSpawns.Select(d => d.SpawnLocation.Value))}\"";
 
-			return $"{prospect.ID},{prospect.Talent},{prospect.Name},{prospect.Duration},{prospect.Forecast},{nodeCount},{nodeList},{nodeAmount}";
+			return $"{prospect.Prospect.Name},{prospect.Talent.RowName},{LocalizationUtil.GetLocalizedString(locProvider, prospect.Prospect.DropName)},{TimeToString(prospect.Prospect.TimeDuration)},{prospect.Prospect.Forecast.RowName},{nodeCount},{nodeList},{nodeAmount}";
+		}
+
+		private static string TimeToString(FIcarusTimeSpan time)
+		{
+			if (time.Seconds.Min == 0)
+			{
+				return $"{time.Days.Min}:{time.Hours.Min:00}:{time.Mins.Min:00}";
+			}
+			return $"{time.Days.Min}:{time.Hours.Min:00}:{time.Mins.Min:00}:{time.Seconds.Min:00}";
 		}
 	}
 }

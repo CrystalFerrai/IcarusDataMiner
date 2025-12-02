@@ -59,13 +59,9 @@ namespace IcarusDataMiner.Miners
 			{
 				spawnConfigSet.Add(terrain.SpawnConfig.RowName);
 			}
-			foreach (IList<ProspectData> prospectList in providerManager.ProspectDataUtil.ProspectsByTier.Values)
+			foreach (ProspectData prospect in providerManager.ProspectDataUtil.AvailableProspects)
 			{
-				foreach (ProspectData prospect in prospectList)
-				{
-					if (prospect.AISpawnConfigOverride is null) continue;
-					spawnConfigSet.Add(prospect.AISpawnConfigOverride);
-				}
+				spawnConfigSet.Add(prospect.Prospect.AISpawnConfigOverride.RowName);
 			}
 
 			Dictionary<string, HashSet<int>> densityMap = new();

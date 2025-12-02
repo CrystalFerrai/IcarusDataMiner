@@ -162,6 +162,9 @@ namespace IcarusDataMiner
 		[JsonIgnore]
 		public static FRowHandle Invalid;
 
+		[JsonIgnore]
+		public readonly bool IsNone => DataTableName.Equals("None") || RowName.Equals("None");
+
 		static FRowHandle()
 		{
 			Invalid = new()
@@ -171,15 +174,17 @@ namespace IcarusDataMiner
 			};
 		}
 
-		public override int GetHashCode()
+		public readonly bool TryResolve<T>(DataTables dataTables, [NotNullWhen(true)] out T? row) where T : IDataTableRow
 		{
-			int hash = 17;
-			hash = hash * 23 + RowName.GetHashCode();
-			hash = hash * 23 + DataTableName.GetHashCode();
-			return hash;
+			return dataTables.TryResolveHandle(this, out row);
 		}
 
-		public override bool Equals([NotNullWhen(true)] object? obj)
+		public override readonly int GetHashCode()
+		{
+			return HashCode.Combine(RowName, DataTableName);
+		}
+
+		public override readonly bool Equals([NotNullWhen(true)] object? obj)
 		{
 			return obj is FRowHandle other && RowName.Equals(other.RowName) && DataTableName.Equals(other.DataTableName);
 		}
@@ -194,9 +199,9 @@ namespace IcarusDataMiner
 			return !a.Equals(b);
 		}
 
-		public override string ToString()
+		public override readonly string ToString()
 		{
-			return RowName ?? "None";
+			return $"{DataTableName}.{RowName}" ?? "None";
 		}
 	}
 

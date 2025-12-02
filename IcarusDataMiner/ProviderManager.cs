@@ -62,8 +62,8 @@ namespace IcarusDataMiner
 				return false;
 			}
 
-			mProspectDataUtil = ProspectDataUtil.Create(mDataProvider, logger);
 			mDataTables = DataTables.Load(mDataProvider, logger);
+			mProspectDataUtil = ProspectDataUtil.Create(mDataProvider, mDataTables, logger);
 
 			return true;
 		}
