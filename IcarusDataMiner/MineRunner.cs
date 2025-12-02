@@ -48,6 +48,7 @@ namespace IcarusDataMiner
 
 		public bool Initialize(IEnumerable<string>? minersToInclude = null)
 		{
+			mLogger.Log(LogLevel.Information, "Loading game data...");
 			if (!mProviderManager.Initialize(mLogger))
 			{
 				return false;
