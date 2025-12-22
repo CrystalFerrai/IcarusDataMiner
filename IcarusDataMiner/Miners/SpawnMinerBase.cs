@@ -206,13 +206,47 @@ namespace IcarusDataMiner.Miners
 		}
 
 		/// <summary>
-		/// Creates an image of spawn information box
+		/// Creates an image of a single spawn information box
 		/// </summary>
 		/// <remarks>
 		/// Will call <see cref="GetInfoBoxSubtitleLines"/> and <see cref="GetInfoBoxFooterLines"/> to gather optional data
 		/// for the info box. Override them to customise. <paramref name="userData"/> will be passed through to those calls.
 		/// </remarks>
 		protected SKData CreateSpawnZoneInfoBox(ISpawnZoneData spawnZone, object? userData = null)
+		{
+			SpawnZoneInfoBoxRenderData renderData = CreateSpawnZoneRenderData(spawnZone, userData);
+
+			SKImageInfo surfaceInfo = new()
+			{
+				Width = (int)renderData.Size.Width,
+				Height = (int)renderData.Size.Height,
+				ColorSpace = SKColorSpace.CreateSrgb(),
+				ColorType = SKColorType.Rgba8888,
+				AlphaType = SKAlphaType.Premul
+			};
+
+			using (SKSurface surface = SKSurface.Create(surfaceInfo))
+			{
+				SKCanvas canvas = surface.Canvas;
+
+				canvas.Clear(BackgroundColor);
+
+				RenderSpawnZoneInfoBox(canvas, renderData);
+
+				surface.Flush();
+				SKImage image = surface.Snapshot();
+				return image.Encode(SKEncodedImageFormat.Png, 100);
+			}
+		}
+
+		/// <summary>
+		/// Measures and prepares data for rendering a spawn info box
+		/// </summary>
+		/// <remarks>
+		/// Will call <see cref="GetInfoBoxSubtitleLines"/> and <see cref="GetInfoBoxFooterLines"/> to gather optional data
+		/// for the info box. Override them to customise. <paramref name="userData"/> will be passed through to those calls.
+		/// </remarks>
+		protected SpawnZoneInfoBoxRenderData CreateSpawnZoneRenderData(ISpawnZoneData spawnZone, object? userData = null)
 		{
 			string titleText = spawnZone.Name[(spawnZone.Name.IndexOf("_") + 1)..];
 
@@ -244,98 +278,137 @@ namespace IcarusDataMiner.Miners
 
 			bool hasBothBodyTexts = bodyLines.Count > 0 && footerLines.Length > 0;
 
-			SKImageInfo surfaceInfo = new()
+			SKSize size = new()
 			{
 				Width = (int)Math.Ceiling(textWidth) + 20,
-				Height = (int)Math.Ceiling(textHeight) + (hasBothBodyTexts ? 40 : 30),
-				ColorSpace = SKColorSpace.CreateSrgb(),
-				ColorType = SKColorType.Rgba8888,
-				AlphaType = SKAlphaType.Premul
+				Height = (int)Math.Ceiling(textHeight) + (hasBothBodyTexts ? 40 : 30)
 			};
 
-			using (SKSurface surface = SKSurface.Create(surfaceInfo))
+			return new SpawnZoneInfoBoxRenderData()
 			{
-				SKCanvas canvas = surface.Canvas;
+				SpawnZone = spawnZone,
+				Size = size,
+				TitleText = titleText,
+				SubtitleLines = subtitleLines,
+				BodyLines = bodyLines.ToArray(),
+				FooterLines = footerLines,
+				CircleRadius = circleRadius,
+				HasBothBodyTexts = hasBothBodyTexts
+			};
+		}
 
-				canvas.Clear(BackgroundColor);
+		/// <summary>
+		/// Renders a spawn zone info box onto the passed in canvas
+		/// </summary>
+		protected void RenderSpawnZoneInfoBox(
+			SKCanvas canvas,
+			SpawnZoneInfoBoxRenderData renderData,
+			SKPoint offset = default,
+			SKSize targetSize = default,
+			bool renderRightEdge = true,
+			bool renderBottomEdge = true)
+		{
+			canvas.Save();
+			canvas.Translate(offset);
 
-				float posY = 20.0f + mTitlePaint.FontSpacing + subtitleLines.Length * mBodyBoldPaint.FontSpacing;
+			if (targetSize.Width == 0.0f || targetSize.Height == 0.0f)
+			{
+				targetSize = renderData.Size;
+			}
 
-				SKColor bannerBGColor = BannerBaseColor;
-				if (spawnZone.Id is null)
-				{
-					bannerBGColor = ColorUtil.ToSKColor(spawnZone.Color, 255);
-				}
-				bool useNegative = !IsColorCloser(mTitlePaint.Color, bannerBGColor, mTitlePaintNegative.Color);
+			float posY = 20.0f + mTitlePaint.FontSpacing + renderData.SubtitleLines.Length * mBodyBoldPaint.FontSpacing;
 
-				// Banner
-				mFillPaint.Color = bannerBGColor;
-				canvas.DrawRect(0.0f, 0.0f, surfaceInfo.Width, posY, mFillPaint);
+			SKColor bannerBGColor = BannerBaseColor;
+			if (renderData.SpawnZone.Id is null)
+			{
+				bannerBGColor = ColorUtil.ToSKColor(renderData.SpawnZone.Color, 255);
+			}
+			bool useNegative = !IsColorCloser(mTitlePaint.Color, bannerBGColor, mTitlePaintNegative.Color);
 
-				// Outline
-				canvas.DrawRect(0.0f, 0.0f, surfaceInfo.Width - 1.0f, surfaceInfo.Height - 1.0f, mLinePaint);
+			SKRect bounds = new(0.0f, 0.0f, targetSize.Width, targetSize.Height);
+			if (renderRightEdge)
+			{
+				bounds.Right -= 1.0f;
+			}
+			if (renderBottomEdge)
+			{
+				bounds.Bottom -= 1.0f;
+			}
 
-				// Title
-				float textPosX = 10.0f;
-				float textPosY = 10.0f - mTitlePaint.FontMetrics.Ascent;
+			// Banner
+			mFillPaint.Color = bannerBGColor;
+			canvas.DrawRect(0.0f, 0.0f, targetSize.Width, posY, mFillPaint);
 
-				if (spawnZone.Id is not null)
-				{
-					float textYOffset = Math.Abs((mTitlePaint.FontMetrics.Ascent - mBodyBoldCenterPaint.FontMetrics.Ascent) * 0.5f);
-					SKPoint circleCenter = new(textPosX + circleRadius, textPosY + (mBodyBoldCenterPaint.FontMetrics.Ascent * 0.33f - textYOffset));
-					canvas.DrawCircle(circleCenter, circleRadius, useNegative ? mNameCirclePaintNegative : mNameCirclePaint);
-					canvas.DrawText(spawnZone.Id, textPosX + circleRadius, textPosY - textYOffset, useNegative ? mBodyBoldCenterPaintNegative : mBodyBoldCenterPaint);
+			// Outline
+			canvas.DrawLine(bounds.Left, bounds.Top, bounds.Left, bounds.Bottom, mLinePaint);
+			canvas.DrawLine(bounds.Left, bounds.Top, bounds.Right, bounds.Top, mLinePaint);
+			if (renderRightEdge)
+			{
+				canvas.DrawLine(bounds.Right, bounds.Top, bounds.Right, bounds.Bottom + 1.0f, mLinePaint);
+			}
+			if (renderBottomEdge)
+			{
+				canvas.DrawLine(bounds.Left, bounds.Bottom, bounds.Right + 1.0f, bounds.Bottom, mLinePaint);
+			}
 
-					canvas.DrawText(titleText, textPosX + circleRadius * 2.0f + 4.0f, textPosY, useNegative ? mTitlePaintNegative : mTitlePaint);
-				}
-				else
-				{
-					canvas.DrawText(titleText, textPosX, textPosY, useNegative ? mTitlePaintNegative : mTitlePaint);
-				}
-				textPosY += mTitlePaint.FontSpacing;
+			// Title
+			float textPosX = 10.0f;
+			float textPosY = 10.0f - mTitlePaint.FontMetrics.Ascent;
 
-				// Subtitles
-				foreach (string subtitle in subtitleLines)
-				{
-					canvas.DrawText(subtitle, textPosX, textPosY, useNegative ? mBodyBoldPaintNegative : mBodyBoldPaint);
-					textPosY += mBodyPaint.FontSpacing;
-				}
+			if (renderData.SpawnZone.Id is not null)
+			{
+				float textYOffset = Math.Abs((mTitlePaint.FontMetrics.Ascent - mBodyBoldCenterPaint.FontMetrics.Ascent) * 0.5f);
+				SKPoint circleCenter = new(textPosX + renderData.CircleRadius, textPosY + (mBodyBoldCenterPaint.FontMetrics.Ascent * 0.33f - textYOffset));
+				canvas.DrawCircle(circleCenter, renderData.CircleRadius, useNegative ? mNameCirclePaintNegative : mNameCirclePaint);
+				canvas.DrawText(renderData.SpawnZone.Id, textPosX + renderData.CircleRadius, textPosY - textYOffset, useNegative ? mBodyBoldCenterPaintNegative : mBodyBoldCenterPaint);
 
-				// Divider
-				textPosY += 10.0f;
-				canvas.DrawLine(1.0f, posY, surfaceInfo.Width - 1.0f, posY, mLinePaint);
+				canvas.DrawText(renderData.TitleText, textPosX + renderData.CircleRadius * 2.0f + 4.0f, textPosY, useNegative ? mTitlePaintNegative : mTitlePaint);
+			}
+			else
+			{
+				canvas.DrawText(renderData.TitleText, textPosX, textPosY, useNegative ? mTitlePaintNegative : mTitlePaint);
+			}
+			textPosY += mTitlePaint.FontSpacing;
+
+			// Subtitles
+			foreach (string subtitle in renderData.SubtitleLines)
+			{
+				canvas.DrawText(subtitle, textPosX, textPosY, useNegative ? mBodyBoldPaintNegative : mBodyBoldPaint);
+				textPosY += mBodyPaint.FontSpacing;
+			}
+
+			// Divider
+			textPosY += 10.0f;
+			canvas.DrawLine(1.0f, posY, bounds.Width, posY, mLinePaint);
+			posY += 5.0f;
+
+			// Body 1
+			foreach (string text in renderData.BodyLines)
+			{
+				canvas.DrawText(text, textPosX, textPosY, mBodyPaint);
+				posY += mBodyPaint.FontSpacing;
+				textPosY += mBodyPaint.FontSpacing;
+			}
+
+			// Divider
+			if (renderData.HasBothBodyTexts)
+			{
+				posY += 5.0f;
+				canvas.DrawLine(1.0f, posY, bounds.Width, posY, mLinePaint);
 				posY += 5.0f;
 
-				// Body 1
-				foreach (string text in bodyLines)
-				{
-					canvas.DrawText(text, textPosX, textPosY, mBodyPaint);
-					posY += mBodyPaint.FontSpacing;
-					textPosY += mBodyPaint.FontSpacing;
-				}
-
-				// Divider
-				if (hasBothBodyTexts)
-				{
-					posY += 5.0f;
-					canvas.DrawLine(1.0f, posY, surfaceInfo.Width - 1.0f, posY, mLinePaint);
-					posY += 5.0f;
-
-					textPosY += 10.0f;
-				}
-
-				// Body 2
-				foreach (string text in footerLines)
-				{
-					canvas.DrawText(text, textPosX, textPosY, mBodyPaint);
-					posY += mBodyPaint.FontSpacing;
-					textPosY += mBodyPaint.FontSpacing;
-				}
-
-				surface.Flush();
-				SKImage image = surface.Snapshot();
-				return image.Encode(SKEncodedImageFormat.Png, 100);
+				textPosY += 10.0f;
 			}
+
+			// Body 2
+			foreach (string text in renderData.FooterLines)
+			{
+				canvas.DrawText(text, textPosX, textPosY, mBodyPaint);
+				posY += mBodyPaint.FontSpacing;
+				textPosY += mBodyPaint.FontSpacing;
+			}
+
+			canvas.Restore();
 		}
 
 		// Is test closer to target than source is to target based on perceived luminance?
@@ -359,6 +432,25 @@ namespace IcarusDataMiner.Miners
 			FColor Color { get; }
 
 			IReadOnlyList<WeightedItem> Spawns { get; }
+		}
+
+		protected struct SpawnZoneInfoBoxRenderData
+		{
+			public ISpawnZoneData SpawnZone;
+
+			public SKSize Size;
+
+			public string TitleText;
+
+			public string[] SubtitleLines;
+
+			public string[] BodyLines;
+
+			public string[] FooterLines;
+
+			public float CircleRadius;
+
+			public bool HasBothBodyTexts;
 		}
 
 		protected class SpawnConfig

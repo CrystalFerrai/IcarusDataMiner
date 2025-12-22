@@ -204,9 +204,9 @@ namespace IcarusDataMiner.Miners
 				string outDir = Path.Combine(config.OutputDirectory, Name, "Visual");
 				foreach (AISpawnConfig spawnConfig in spawnConfigs)
 				{
-					bool showDesnities = densityMap[spawnConfig.Name].Count > 1;
+					bool showDensities = densityMap[spawnConfig.Name].Count > 1;
 
-					// Full spawn zone and composite info images
+					// Spawn zone info images
 					{
 						HashSet<string> seenZoneFileNames = new();
 
@@ -218,7 +218,7 @@ namespace IcarusDataMiner.Miners
 								zoneFileName = $"{spawnZone.Name}_{i}";
 							}
 
-							SKData outData = CreateSpawnZoneInfoBox(spawnZone, showDesnities);
+							SKData outData = CreateSpawnZoneInfoBox(spawnZone, showDensities);
 
 							string outPath = Path.Combine(outDir, spawnConfig.Name, "Zones", $"{zoneFileName}.png");
 							using (FileStream outStream = IOUtil.CreateFile(outPath, logger))
@@ -226,20 +226,114 @@ namespace IcarusDataMiner.Miners
 								outData.SaveTo(outStream);
 							}
 						}
+					}
 
-						foreach (CompositeSpawnZone spawnZone in spawnConfig.CompositeZones)
+					// Composite info image
+					{
+						int columnCount = (int)Math.Ceiling(Math.Sqrt(spawnConfig.CompositeZones.Count));
+						int rowCount = columnCount;
+						if (columnCount * rowCount >= spawnConfig.CompositeZones.Count + columnCount)
 						{
-							SKData outData = CreateSpawnZoneInfoBox(spawnZone, showDesnities);
+							--rowCount;
+						}
 
-							string outPath = Path.Combine(outDir, spawnConfig.Name, "Composites", $"{spawnZone.Id}.png");
-							using (FileStream outStream = IOUtil.CreateFile(outPath, logger))
+						List<SpawnZoneInfoBoxRenderData> compositeZones = new();
+						float[] columnWidths = new float[columnCount];
+						float[] rowHeights = new float[rowCount];
+						{
+							int index = 0;
+							foreach (CompositeSpawnZone spawnZone in spawnConfig.CompositeZones)
 							{
-								outData.SaveTo(outStream);
+								SpawnZoneInfoBoxRenderData renderData = CreateSpawnZoneRenderData(spawnZone, showDensities);
+								compositeZones.Add(renderData);
+
+								int currentColumn = index % columnCount;
+								if (renderData.Size.Width > columnWidths[currentColumn])
+								{
+									columnWidths[currentColumn] = renderData.Size.Width;
+								}
+
+								int currentRow = index / columnCount;
+								if (renderData.Size.Height > rowHeights[currentRow])
+								{
+									rowHeights[currentRow] = renderData.Size.Height;
+								}
+
+								++index;
 							}
+						}
+
+						float totalWidth = 0;
+						for (int i = 0; i < columnWidths.Length; ++i)
+						{
+							columnWidths[i] = (float)Math.Ceiling(columnWidths[i]);
+							totalWidth += columnWidths[i];
+						}
+
+						float totalHeight = 0;
+						for (int i = 0; i < rowHeights.Length; ++i)
+						{
+							rowHeights[i] = (float)Math.Ceiling(rowHeights[i]);
+							totalHeight += rowHeights[i];
+						}
+
+						SKImageInfo surfaceInfo = new()
+						{
+							Width = (int)totalWidth,
+							Height = (int)totalHeight,
+							ColorSpace = SKColorSpace.CreateSrgb(),
+							ColorType = SKColorType.Rgba8888,
+							AlphaType = SKAlphaType.Premul
+						};
+
+						SKData outData;
+						using (SKSurface surface = SKSurface.Create(surfaceInfo))
+						{
+							SKCanvas canvas = surface.Canvas;
+
+							canvas.Clear(BackgroundColor);
+
+							SKPoint offset = SKPoint.Empty;
+							SKSize size = SKSize.Empty;
+							for (int y = 0; y < rowCount; ++y)
+							{
+								offset.X = 0;
+								size.Height = rowHeights[y];
+								for (int x = 0; x < columnCount; ++x)
+								{
+									size.Width = columnWidths[x];
+									int index = y * columnCount + x;
+
+									if (index < compositeZones.Count)
+									{
+										RenderSpawnZoneInfoBox(canvas, compositeZones[index], offset, size, x == columnCount - 1, y == rowCount - 1);
+									}
+									else
+									{
+										if (index == compositeZones.Count)
+										{
+											canvas.DrawLine(offset.X, offset.Y, offset.X, offset.Y + size.Height, mLinePaint);
+										}
+										canvas.DrawLine(offset.X, offset.Y, offset.X + size.Width, offset.Y, mLinePaint);
+									}
+									offset.X += size.Width;
+								}
+								offset.Y += size.Height;
+							}
+
+							surface.Flush();
+							SKImage image = surface.Snapshot();
+							outData = image.Encode(SKEncodedImageFormat.Png, 100);
+						}
+
+						string outPath = Path.Combine(outDir, spawnConfig.Name, "Composites.png");
+						using (FileStream outStream = IOUtil.CreateFile(outPath, logger))
+						{
+							outData.SaveTo(outStream);
 						}
 					}
 
-					// Composite reference info images
+					// Composite reference images
 					{
 						HashSet<string> seenZoneFileNames = new();
 
@@ -444,7 +538,14 @@ namespace IcarusDataMiner.Miners
 
 			public int CompareTo(CompositeSpawnZone? other)
 			{
-				return other is null ? 1 : Id!.CompareTo(other.Id);
+				if (other is null) return 1;
+
+				if (int.TryParse(Id, out int a) && int.TryParse(other.Id, out int b))
+				{
+					return a.CompareTo(b);
+				}
+
+				return Id!.CompareTo(other.Id);
 			}
 
 			private static string TrimName(string name)
