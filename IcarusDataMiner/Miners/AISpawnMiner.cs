@@ -230,11 +230,20 @@ namespace IcarusDataMiner.Miners
 
 					// Composite info image
 					{
-						int columnCount = (int)Math.Ceiling(Math.Sqrt(spawnConfig.CompositeZones.Count));
-						int rowCount = columnCount;
-						if (columnCount * rowCount >= spawnConfig.CompositeZones.Count + columnCount)
+						int columnCount, rowCount;
+						if (spawnConfig.Name.Equals("Prometheus"))
 						{
-							--rowCount;
+							columnCount = 3;
+							rowCount = (int)Math.Ceiling(spawnConfig.CompositeZones.Count / (double)columnCount);
+						}
+						else
+						{
+							columnCount = (int)Math.Ceiling(Math.Sqrt(spawnConfig.CompositeZones.Count) / 2.0);
+							rowCount = columnCount * 4;
+							if (columnCount * rowCount >= spawnConfig.CompositeZones.Count + columnCount)
+							{
+								--rowCount;
+							}
 						}
 
 						List<SpawnZoneInfoBoxRenderData> compositeZones = new();
