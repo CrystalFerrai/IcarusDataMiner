@@ -72,7 +72,7 @@ namespace IcarusDataMiner.Miners
 
 				GameFile? packageFile;
 				if (!providerManager.AssetProvider.Files.TryGetValue(packageName, out packageFile)) continue;
-				
+
 				logger.Log(LogLevel.Information, $"Processing {packageFile.NameWithoutExtension}...");
 				ExportCaves(packageFile, templates, providerManager, world, config, logger);
 			}
@@ -204,23 +204,28 @@ namespace IcarusDataMiner.Miners
 							foreach (var pair in actorMap.Properties)
 							{
 								FPackageIndex key = (FPackageIndex)pair.Key!.GetValue(typeof(FPackageIndex))!;
-								if (!key.Name.Equals("BP_CRE_CaveWorm_C")) continue;
-
 								UScriptStruct value = (UScriptStruct)pair.Value!.GetValue(typeof(UScriptStruct))!;
-								IPropertyHolder spawnProperties = (IPropertyHolder)value.StructType;
-								for (int j = 0; j < spawnProperties.Properties.Count; ++j)
-								{
-									FPropertyTag spawnProperty = spawnProperties.Properties[j];
 
-									switch (spawnProperty.Name.PlainText)
-									{
-										case "MinSpawnNumber":
-											template.WormCountMin = PropertyUtil.GetByIndex<int>(spawnProperties, j);
-											break;
-										case "MaxSpawnNumber":
-											template.WormCountMax = PropertyUtil.GetByIndex<int>(spawnProperties, j);
-											break;
-									}
+								switch (key.Name)
+								{
+									case "BP_WildBeeHive_C":
+										template.BeeCount = ReadSpawnCount(value);
+										break;
+									case "BP_CRE_LandShark_C":
+										template.LandSharkCount = ReadSpawnCount(value);
+										break;
+									case "BP_SpiderNest_C":
+										template.SpiderCount = ReadSpawnCount(value);
+										break;
+									case "BP_BatNest_C":
+										template.VesperCount = ReadSpawnCount(value);
+										break;
+									case "BP_CRE_CaveWorm_C":
+										template.WormCount = ReadSpawnCount(value);
+										break;
+									default:
+										logger.Log(LogLevel.Information, $"Unknown cave actor spawn type '{key.Name}' in template '{templateAsset.NameWithoutExtension}'");
+										break;
 								}
 							}
 
@@ -230,6 +235,29 @@ namespace IcarusDataMiner.Miners
 			}
 
 			return template;
+		}
+
+		private static IntRange ReadSpawnCount(UScriptStruct propertyValue)
+		{
+			IntRange result = new();
+
+			IPropertyHolder spawnProperties = (IPropertyHolder)propertyValue.StructType;
+			for (int j = 0; j < spawnProperties.Properties.Count; ++j)
+			{
+				FPropertyTag spawnProperty = spawnProperties.Properties[j];
+
+				switch (spawnProperty.Name.PlainText)
+				{
+					case "MinSpawnNumber":
+						result.Min = PropertyUtil.GetByIndex<int>(spawnProperties, j);
+						break;
+					case "MaxSpawnNumber":
+						result.Max = PropertyUtil.GetByIndex<int>(spawnProperties, j);
+						break;
+				}
+			}
+
+			return result;
 		}
 
 		private void ExportCaves(GameFile mapAsset, IReadOnlyDictionary<string, CaveTemplate> templates, IProviderManager providerManager, WorldData worldData, Config config, Logger logger)
@@ -269,15 +297,13 @@ namespace IcarusDataMiner.Miners
 					using (FileStream outStream = IOUtil.CreateFile(outPath, logger))
 					using (StreamWriter writer = new StreamWriter(outStream))
 					{
-						writer.WriteLine("Quad,ID,Template,Ore Foliage Type,Ore Count,Exotics,DeepOres,DO1X,DO1Y,DO1Z,DO2X,DO2Y,DO2Z,DO3X,DO3Y,DO3Z,Worms,Lakes,Water,Lava,Mushrooms,Entrance X,Entrance Y,Entrance Z,Entrance R,Entrance Grid");
+						writer.WriteLine("Quad,ID,Template,Ore Foliage Type,Ore Count,Exotics,DeepOres,DO1X,DO1Y,DO1Z,DO2X,DO2Y,DO2Z,DO3X,DO3Y,DO3Z,Bee Min,Bee Max,Landshark Min,Landshark Max,Spider Min,Spider Max,Vesper Min,Vesper Max,Worm Min,Worm Max,Lakes,Water,Lava,Mushrooms,Entrance X,Entrance Y,Entrance Z,Entrance R,Entrance Grid");
 
 						foreach (CaveData cave in templateCaves)
 						{
 							if (cave.Template!.OreData.Count != 1) throw new NotImplementedException();
 							if (cave.Template!.Entrances.Count != 1) throw new NotImplementedException();
 							if (cave.DeepOreLocations.Count > 3) throw new NotImplementedException();
-
-							string wormCount = $"\"=\"\"{cave.Template.WormCountMin}-{cave.Template.WormCountMax}\"\"\""; // Weird format so that Excel won't interpret the field as a date
 
 							Locator entrance = cave.Entrances[0].Location;
 							string[] deepOrePos = new string[] { ",,", ",,", ",," };
@@ -287,7 +313,9 @@ namespace IcarusDataMiner.Miners
 								deepOrePos[i] = $"{deepOre.Position.X},{deepOre.Position.Y},{deepOre.Position.Z}";
 							}
 
-							writer.WriteLine($"{cave.QuadName},{cave.QuadName[0]}-{cave.ID},{cave.Template.Name},{cave.Template.OreData[0].Pool},{cave.Template.OreData[0].Count},{cave.Template.ExoticCount},{cave.DeepOreLocations.Count},{deepOrePos[0]},{deepOrePos[1]},{deepOrePos[2]},{wormCount},{cave.Template.TotalLakeCount},{cave.Template.WaterCount},{cave.Template.LavaCount},{cave.Template.MushroomCount},{entrance.Position.X},{entrance.Position.Y},{entrance.Position.Z},{entrance.Rotation.Yaw},{worldData.GetGridCell(entrance.Position)}");
+							string spawners = $"{cave.Template.BeeCount.Min},{cave.Template.BeeCount.Max},{cave.Template.LandSharkCount.Min},{cave.Template.LandSharkCount.Max},{cave.Template.SpiderCount.Min},{cave.Template.SpiderCount.Max},{cave.Template.VesperCount.Min},{cave.Template.VesperCount.Max},{cave.Template.WormCount.Min},{cave.Template.WormCount.Max}";
+
+							writer.WriteLine($"{cave.QuadName},{cave.QuadName[0]}-{cave.ID},{cave.Template.Name},{cave.Template.OreData[0].Pool},{cave.Template.OreData[0].Count},{cave.Template.ExoticCount},{cave.DeepOreLocations.Count},{deepOrePos[0]},{deepOrePos[1]},{deepOrePos[2]},{spawners},{cave.Template.TotalLakeCount},{cave.Template.WaterCount},{cave.Template.LavaCount},{cave.Template.MushroomCount},{entrance.Position.X},{entrance.Position.Y},{entrance.Position.Z},{entrance.Rotation.Yaw},{worldData.GetGridCell(entrance.Position)}");
 						}
 					}
 				}
@@ -558,7 +586,6 @@ namespace IcarusDataMiner.Miners
 
 				if (caveData.Template != null)
 				{
-					//if (caveData.Template.Name == "CAVE_CF_MED_004") System.Diagnostics.Debugger.Break();
 					foreach (Locator entranceLocation in caveData.Template.Entrances)
 					{
 						caveData.Entrances.Add(new CaveEntranceData(caveData.RootComponent) { Location = entranceLocation });
@@ -652,7 +679,7 @@ namespace IcarusDataMiner.Miners
 			public int CompareTo(CaveData? other)
 			{
 				if (other is null) return 1;
-				
+
 				int quadCompare = QuadName.CompareTo(other.QuadName);
 				if (quadCompare != 0) return quadCompare;
 
@@ -702,9 +729,15 @@ namespace IcarusDataMiner.Miners
 
 			public IList<Locator> DeepOreLocations { get; } = new List<Locator>();
 
-			public int WormCountMin { get; set; }
+			public IntRange BeeCount { get; set; }
 
-			public int WormCountMax { get; set; }
+			public IntRange LandSharkCount { get; set; }
+
+			public IntRange SpiderCount { get; set; }
+
+			public IntRange VesperCount { get; set; }
+
+			public IntRange WormCount { get; set; }
 
 			public int MushroomCount { get; set; }
 
@@ -758,7 +791,7 @@ namespace IcarusDataMiner.Miners
 
 #pragma warning disable CS0649 // Field never assigned to
 
-		struct FWaterSetup : IDataTableRow
+		private struct FWaterSetup : IDataTableRow
 		{
 			public string Name { get; set; }
 			public JObject? Metadata { get; set; }
@@ -774,5 +807,19 @@ namespace IcarusDataMiner.Miners
 		}
 
 #pragma warning restore CS0649
+
+		private struct IntRange
+		{
+			public static IntRange Zero = new(0, 0);
+
+			public int Min;
+			public int Max;
+
+			public IntRange(int min, int max)
+			{
+				Min = min;
+				Max = max;
+			}
+		}
 	}
 }
