@@ -218,7 +218,12 @@ namespace IcarusDataMiner
 							float locationRadius = location.Size * sizeScale;
 							if (location is RotatedMapLocation rotatedLocation)
 							{
-								transform = transform.PreConcat(SKMatrix.CreateRotationDegrees(rotatedLocation.RotationDegrees + 90.0f, locationRadius, locationRadius));
+								float pivot = locationRadius;
+								if (collection.Shape == MarkerShape.Square)
+								{
+									pivot = 0.0f;
+								}
+								transform = transform.PreConcat(SKMatrix.CreateRotationDegrees(rotatedLocation.RotationDegrees + 90.0f, pivot, pivot));
 							}
 
 							canvas.SetMatrix(transform);
