@@ -149,6 +149,11 @@ namespace IcarusDataMiner.Miners
 
 		private void ProcessQuest(QuestData quest, FQuestSetup questSetup, IcarusDataTable<FQuestSetup> questsTable, QuestLocationQueryData locationQueryData, IProviderManager providerManager, Logger logger)
 		{
+			if (!questSetup.LocationQuery.IsNone)
+			{
+				AddQuestLocation(quest, questSetup.LocationQuery.DataTableName, questSetup.LocationQuery.RowName, locationQueryData, logger);
+			}
+
 			string? bpPath = questSetup.Class.GetAssetPath(true);
 			if (bpPath is null)
 			{
@@ -378,6 +383,8 @@ namespace IcarusDataMiner.Miners
 		public string? Description { get; set; }
 		public List<QuestData> SubQuests { get; }
 
+		public int PlayerSpawnGroup { get; set; }
+
 		public Dictionary<string, List<FVector>> Locations { get; }
 		public List<string> PrebuiltStructures { get; }
 
@@ -409,6 +416,7 @@ namespace IcarusDataMiner.Miners
 		{
 			SubQuests = new();
 			Locations = new();
+			PlayerSpawnGroup = -1;
 			PrebuiltStructures = new();
 		}
 
@@ -421,7 +429,7 @@ namespace IcarusDataMiner.Miners
 
 		public static QuestData Create(FIcarusProspect prospect)
 		{
-			return new(prospect.Name, prospect.DropName);
+			return new(prospect.Name, prospect.DropName) { PlayerSpawnGroup = prospect.PlayerSpawnGroupIndex };
 		}
 
 		public static QuestData Create(FQuestSetup quest)
@@ -462,6 +470,12 @@ namespace IcarusDataMiner.Miners
 			else
 			{
 				writer.WriteValue(LocalizationUtil.GetLocalizedString(locProvider, Description));
+			}
+
+			if (PlayerSpawnGroup >= 0)
+			{
+				writer.WritePropertyName(nameof(PlayerSpawnGroup));
+				writer.WriteValue(PlayerSpawnGroup);
 			}
 
 			WriteProperties(writer);
