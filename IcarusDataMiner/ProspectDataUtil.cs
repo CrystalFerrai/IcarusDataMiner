@@ -52,6 +52,7 @@ namespace IcarusDataMiner
 				"Prospect_Olympus",
 				"Prospect_Styx",
 				"Prospect_Prometheus",
+				"Prospect_Elysium",
 				"GreatHunt_IceMammoth",
 				"GreatHunt_Ape",
 				"GreatHunt_RockGolem"

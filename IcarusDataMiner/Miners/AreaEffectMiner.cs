@@ -24,20 +24,18 @@ using System.Text.RegularExpressions;
 namespace IcarusDataMiner.Miners
 {
 	/// <summary>
-	/// Extracts geyser location information for all maps
+	/// Extracts area location information for all maps
 	/// </summary>
-	internal class GeyserMiner : IDataMiner
+	internal class AreaEffectMiner : IDataMiner
 	{
-		// To extract a geyser ID from a geyser name
-		private static readonly Regex sGeyserIdRegex;
-		private static readonly Regex sOilIdRegex;
+		// To extract a area ID from a area name
+		private static readonly Regex sRadiationIdRegex;
 
-		public string Name => "Geysers";
+		public string Name => "AreaEffects";
 
-		static GeyserMiner()
+		static AreaEffectMiner()
 		{
-			sGeyserIdRegex = new Regex(@"BP_EnzymeGeyser(\d*)");
-			sOilIdRegex = new Regex(@"BP_OilGeyser(\d*)");
+			sRadiationIdRegex = new Regex(@"BP_Uranium_Emitter(\d*)");
 		}
 
 		public bool Run(IProviderManager providerManager, Config config, Logger logger)
@@ -52,18 +50,18 @@ namespace IcarusDataMiner.Miners
 				if (!providerManager.AssetProvider.Files.TryGetValue(packageName, out packageFile)) continue;
 
 				logger.Log(LogLevel.Information, $"Processing {packageFile.NameWithoutExtension}...");
-				ExportGeysers(packageFile, providerManager, world, config, logger);
+				ExportAreas(packageFile, providerManager, world, config, logger);
 			}
 
 			return true;
 		}
 
-		private void ExportGeysers(GameFile mapAsset, IProviderManager providerManager, WorldData worldData, Config config, Logger logger)
+		private void ExportAreas(GameFile mapAsset, IProviderManager providerManager, WorldData worldData, Config config, Logger logger)
 		{
-			List<GeyserData> geysers = FindGeysers(mapAsset, providerManager, logger).ToList();
-			geysers.Sort();
+			List<AreaData> areas = FindAreas(mapAsset, providerManager, logger).ToList();
+			areas.Sort();
 
-			if (geysers.Count > 0)
+			if (areas.Count > 0)
 			{
 				// CSV
 				{
@@ -71,13 +69,11 @@ namespace IcarusDataMiner.Miners
 					using (FileStream outStream = IOUtil.CreateFile(outCustomPath, logger))
 					using (StreamWriter writer = new StreamWriter(outStream))
 					{
-						writer.WriteLine("ID,Type,Location X,Location Y,Location Z,Grid");
+						writer.WriteLine("ID,Active,Radius,Location X,Location Y,Location Z,Grid");
 
-						foreach (GeyserData geyser in geysers)
+						foreach (AreaData area in areas)
 						{
-							int geyserCharIndex = geyser.Type.Text.LastIndexOf('_');
-							if (geyserCharIndex < 0) geyserCharIndex = geyser.Type.Text.Length;
-							writer.WriteLine($"{geyser.ID},{geyser.Type.Text[0..geyserCharIndex]},{geyser.Location.X},{geyser.Location.Y},{geyser.Location.Z},{worldData.GetGridCell(geyser.Location)}");
+							writer.WriteLine($"{area.ID},{area.IsActive},{area.Radius},{area.Location.X},{area.Location.Y},{area.Location.Z},{worldData.GetGridCell(area.Location)}");
 						}
 					}
 				}
@@ -85,7 +81,8 @@ namespace IcarusDataMiner.Miners
 				// Image
 				{
 					MapOverlayBuilder mapBuilder = MapOverlayBuilder.Create(worldData, providerManager.AssetProvider);
-					mapBuilder.AddLocations(geysers.Select(d => new MapLocation(d.Location, 5.0f)));
+					mapBuilder.AddLocations(areas.Where(a => a.IsActive).Select(a => new AreaMapLocation(a.Location, a.Radius)), new SKColor(192, 255, 128, 192));
+					mapBuilder.AddLocations(areas.Where(a => !a.IsActive).Select(a => new AreaMapLocation(a.Location, a.Radius)), new SKColor(136, 144, 128, 192));
 					SKData outData = mapBuilder.DrawOverlay();
 
 					string outPath = Path.Combine(config.OutputDirectory, Name, $"{mapAsset.NameWithoutExtension}.png");
@@ -97,18 +94,24 @@ namespace IcarusDataMiner.Miners
 			}
 		}
 
-		private IEnumerable<GeyserData> FindGeysers(GameFile mapAsset, IProviderManager providerManager, Logger logger)
+		private IEnumerable<AreaData> FindAreas(GameFile mapAsset, IProviderManager providerManager, Logger logger)
 		{
 			Package mapPackage = (Package)providerManager.AssetProvider.LoadPackage(mapAsset);
 
-			int geyserNameIndex = -1, rootComponentIndex = -1, relativeLocationIndex = -1, hordeRowHandleIndex = -1;
+			int radiationNameIndex = -1, radiationRadiusIndex = -1, radiationEnabledIndex = -1, rootComponentIndex = -1, relativeLocationIndex = -1;
 			for (int i = 0; i < mapPackage.NameMap.Length; ++i)
 			{
 				FNameEntrySerialized name = mapPackage.NameMap[i];
 				switch (name.Name)
 				{
-					case "BP_EnzymeGeyser_C":
-						geyserNameIndex = i;
+					case "BP_Uranium_Emitter_C":
+						radiationNameIndex = i;
+						break;
+					case "RadiationDistance":
+						radiationRadiusIndex = i;
+						break;
+					case "EmittingRadiation":
+						radiationEnabledIndex = i;
 						break;
 					case "RootComponent":
 						rootComponentIndex = i;
@@ -116,50 +119,43 @@ namespace IcarusDataMiner.Miners
 					case "RelativeLocation":
 						relativeLocationIndex = i;
 						break;
-					case "HordeRowHandle":
-						hordeRowHandleIndex = i;
-						break;
 				}
 			}
 
-			if (geyserNameIndex < 0) yield break; // No geysers
+			if (radiationNameIndex < 0) yield break; // No areas
 
-			int geyserTypeIndex = -1;
+			int radiationTypeIndex = -1;
 			for (int i = 0; i < mapPackage.ImportMap.Length; ++i)
 			{
-				if (mapPackage.ImportMap[i].ObjectName.Index == geyserNameIndex)
+				if (mapPackage.ImportMap[i].ObjectName.Index == radiationNameIndex)
 				{
-					geyserTypeIndex = ~i;
+					radiationTypeIndex = ~i;
 				}
 			}
 
 			foreach (FObjectExport? export in mapPackage.ExportMap)
 			{
 				if (export == null) continue;
-				if (export.ClassIndex.Index != geyserTypeIndex) continue;
+				if (export.ClassIndex.Index != radiationTypeIndex) continue;
 
-				UObject geyserObject = export.ExportObject.Value;
+				UObject areaObject = export.ExportObject.Value;
 
-				Match match = sGeyserIdRegex.Match(geyserObject.Name);
+				Match match = sRadiationIdRegex.Match(areaObject.Name);
 				if (!match.Success)
 				{
-					match = sOilIdRegex.Match(geyserObject.Name);
-				}
-				if (!match.Success)
-				{
-					logger.Log(LogLevel.Warning, $"Error parsing geyser name {geyserObject.Name} in {mapAsset.NameWithoutExtension}. Geyser will be skipped");
+					logger.Log(LogLevel.Warning, $"Error parsing area name {areaObject.Name} in {mapAsset.NameWithoutExtension}. Area will be skipped");
 					continue;
 				}
 
-				GeyserData geyserData = new();
-				geyserData.ID = match.Groups[1].Value.Length > 0 ? int.Parse(match.Groups[1].Value) : 1;
+				AreaData areaData = new();
+				areaData.ID = match.Groups[1].Value.Length > 0 ? int.Parse(match.Groups[1].Value) : 1;
 
-				for (int i = 0; i < geyserObject.Properties.Count; ++i)
+				for (int i = 0; i < areaObject.Properties.Count; ++i)
 				{
-					FPropertyTag prop = geyserObject.Properties[i];
+					FPropertyTag prop = areaObject.Properties[i];
 					if (prop.Name.Index == rootComponentIndex)
 					{
-						FPackageIndex rootComponentProperty = PropertyUtil.GetByIndex<FPackageIndex>(geyserObject, i);
+						FPackageIndex rootComponentProperty = PropertyUtil.GetByIndex<FPackageIndex>(areaObject, i);
 						UObject rootComponentObject = rootComponentProperty.ResolvedObject!.Object!.Value;
 
 						for (int j = 0; j < rootComponentObject.Properties.Count; ++j)
@@ -167,44 +163,50 @@ namespace IcarusDataMiner.Miners
 							FPropertyTag subProp = rootComponentObject.Properties[j];
 							if (subProp.Name.Index == relativeLocationIndex)
 							{
-								geyserData.Location = PropertyUtil.GetByIndex<FVector>(rootComponentObject, j);
+								areaData.Location = PropertyUtil.GetByIndex<FVector>(rootComponentObject, j);
 							}
 						}
 					}
-					else if (prop.Name.Index == hordeRowHandleIndex)
+					else if (prop.Name.Index == radiationRadiusIndex)
 					{
-						UScriptStruct hordeRowHandleStruct = PropertyUtil.GetByIndex<UScriptStruct>(geyserObject, i);
-						geyserData.Type = PropertyUtil.GetByIndex<FName>((IPropertyHolder)hordeRowHandleStruct.StructType, 0);
+						areaData.Radius = PropertyUtil.GetByIndex<float>(areaObject, i);
+					}
+					else if (prop.Name.Index == radiationEnabledIndex)
+					{
+						areaData.IsActive = PropertyUtil.GetByIndex<bool>(areaObject, i);
 					}
 				}
 
-				yield return geyserData;
+				yield return areaData;
 			}
 		}
 
-		private class GeyserData : IComparable<GeyserData>
+		private class AreaData : IComparable<AreaData>
 		{
 			public int ID { get; set; }
 
-			public FName Type { get; set; }
-
 			public FVector Location { get; set; }
 
-			public GeyserData()
+			public float Radius { get; set; }
+
+			public bool IsActive { get; set; }
+
+			public AreaData()
 			{
 				ID = 0;
-				Type = "Test";
 				Location = FVector.ZeroVector;
+				Radius = 3500.0f;
+				IsActive = false;
 			}
 
-			public int CompareTo(GeyserData? other)
+			public int CompareTo(AreaData? other)
 			{
 				return other == null ? 1 : ID.CompareTo(other.ID);
 			}
 
 			public override string ToString()
 			{
-				return $"{ID} - {Type}";
+				return ID.ToString();
 			}
 		}
 	}

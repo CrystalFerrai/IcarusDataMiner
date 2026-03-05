@@ -51,7 +51,7 @@ namespace IcarusDataMiner.Miners
 		{
 			Package mapPackage = (Package)providerManager.AssetProvider.LoadPackage(mapAsset);
 
-			int oreTypeNameIndex = -1, iceVariantIndex = -1, woodVariantIndex = -1, rootComponentIndex = -1, relativeLocationIndex = -1;
+			int oreTypeNameIndex = -1, uraniumTypeNameIndex = -1, oilTypeNameIndex = -1, iceVariantIndex = -1, woodVariantIndex = -1, rootComponentIndex = -1, relativeLocationIndex = -1;
 			for (int i = 0; i < mapPackage.NameMap.Length; ++i)
 			{
 				FNameEntrySerialized name = mapPackage.NameMap[i];
@@ -59,6 +59,12 @@ namespace IcarusDataMiner.Miners
 				{
 					case "BP_DeepOreDepositSpawn_C":
 						oreTypeNameIndex = i;
+						break;
+					case "BP_MetaDeposit_Uranium_C":
+						uraniumTypeNameIndex = i;
+						break;
+					case "BP_OilGeyser_C":
+						oilTypeNameIndex = i;
 						break;
 					case "SpawnIceVariant":
 						iceVariantIndex = i;
@@ -75,13 +81,21 @@ namespace IcarusDataMiner.Miners
 				}
 			}
 
-			int oreTypeClassIndex = -1;
+			int oreTypeClassIndex = -1, uraniumTypeClassIndex = -1, oilTypeClassIndex = -1;
 			for (int i = 0; i < mapPackage.ImportMap.Length; ++i)
 			{
 				FObjectImport import = mapPackage.ImportMap[i];
 				if (import.ObjectName.Index == oreTypeNameIndex)
 				{
 					oreTypeClassIndex = ~i;
+				}
+				else if (import.ObjectName.Index == uraniumTypeNameIndex)
+				{
+					uraniumTypeClassIndex = ~i;
+				}
+				else if (mapPackage.ImportMap[i].ObjectName.Index == oilTypeNameIndex)
+				{
+					oilTypeClassIndex = ~i;
 				}
 			}
 
@@ -90,11 +104,15 @@ namespace IcarusDataMiner.Miners
 			foreach (FObjectExport? export in mapPackage.ExportMap)
 			{
 				if (export == null) continue;
-				if (export.ClassIndex.Index != oreTypeClassIndex) continue;
+				if (export.ClassIndex.Index != oreTypeClassIndex &&
+					export.ClassIndex.Index != uraniumTypeClassIndex &&
+					export.ClassIndex.Index != oilTypeClassIndex) continue;
 
 				DepositInfo deposit = new();
 				deposit.SetName(export.ObjectName);
-				deposit.Type = DepositType.Ore;
+				deposit.Type = export.ClassIndex.Index == uraniumTypeClassIndex ? DepositType.Uranium
+					: export.ClassIndex.Index == oilTypeClassIndex ? DepositType.Oil
+					: DepositType.Ore;
 
 				UObject veinObject = export.ExportObject.Value;
 				for (int i = 0; i < veinObject.Properties.Count; ++i)
@@ -165,6 +183,8 @@ namespace IcarusDataMiner.Miners
 					mapBuilder.AddLocations(oreDeposits.Where(o => o.Type == DepositType.Ore).Select(d => new MapLocation(d.Location, 7.0f)));
 					mapBuilder.AddLocations(oreDeposits.Where(o => o.Type == DepositType.Ice).Select(d => new RotatedMapLocation(d.Location, 45.0f, 7.0f)), new SKColor(168, 160, 255, 255), MarkerShape.Square);
 					mapBuilder.AddLocations(oreDeposits.Where(o => o.Type == DepositType.Wood).Select(d => new MapLocation(d.Location, 7.0f)), new SKColor(225, 150, 100, 255), MarkerShape.Square);
+					mapBuilder.AddLocations(oreDeposits.Where(o => o.Type == DepositType.Uranium).Select(d => new MapLocation(d.Location, 7.0f)), new SKColor(192, 255, 128, 255));
+					mapBuilder.AddLocations(oreDeposits.Where(o => o.Type == DepositType.Oil).Select(d => new MapLocation(d.Location, 7.0f)), new SKColor(160, 160, 160, 255));
 					SKData outData = mapBuilder.DrawOverlay();
 					mapBuilder.ClearLocations();
 
@@ -239,9 +259,21 @@ namespace IcarusDataMiner.Miners
 					}
 				}
 
-				if (nameText.StartsWith("BP_DeepOreDepositSpawn"))
+				if (nameText.StartsWith("BP_MetaDeposit_"))
+				{
+					parseId(nameText["BP_MetaDeposit_".Length..]);
+				}
+				else if (nameText.StartsWith("BP_DeepOreDepositSpawn"))
 				{
 					parseId(nameText["BP_DeepOreDepositSpawn".Length..]);
+				}
+				else if (nameText.StartsWith("BP_Deep_Mining_Ice_Deposit"))
+				{
+					parseId(nameText["BP_Deep_Mining_Ice_Deposit".Length..]);
+				}
+				else if (nameText.StartsWith("BP_"))
+				{
+					parseId(nameText["BP_".Length..]);
 				}
 
 				mId = id;
@@ -266,7 +298,9 @@ namespace IcarusDataMiner.Miners
 			Unknown,
 			Ore,
 			Ice,
-			Wood
+			Wood,
+			Uranium,
+			Oil
 		}
 	}
 }

@@ -297,11 +297,11 @@ namespace IcarusDataMiner.Miners
 					using (FileStream outStream = IOUtil.CreateFile(outPath, logger))
 					using (StreamWriter writer = new StreamWriter(outStream))
 					{
-						writer.WriteLine("Quad,ID,Template,Ore Foliage Type,Ore Count,Exotics,DeepOres,DO1X,DO1Y,DO1Z,DO2X,DO2Y,DO2Z,DO3X,DO3Y,DO3Z,Bee Min,Bee Max,Landshark Min,Landshark Max,Spider Min,Spider Max,Vesper Min,Vesper Max,Worm Min,Worm Max,Lakes,Water,Lava,Mushrooms,Entrance X,Entrance Y,Entrance Z,Entrance R,Entrance Grid");
+						writer.WriteLine("Quad,ID,Template,Ore Type 1,Ore Count 1,Ore Type 2,Ore Count 2,Exotics,DeepOres,DO1X,DO1Y,DO1Z,DO2X,DO2Y,DO2Z,DO3X,DO3Y,DO3Z,Bee Min,Bee Max,Landshark Min,Landshark Max,Spider Min,Spider Max,Vesper Min,Vesper Max,Worm Min,Worm Max,Lakes,Water,Lava,Mushrooms,Entrance X,Entrance Y,Entrance Z,Entrance R,Entrance Grid");
 
 						foreach (CaveData cave in templateCaves)
 						{
-							if (cave.Template!.OreData.Count != 1) throw new NotImplementedException();
+							if (cave.Template!.OreData.Count > 2) throw new NotImplementedException();
 							if (cave.Template!.Entrances.Count != 1) throw new NotImplementedException();
 							if (cave.DeepOreLocations.Count > 3) throw new NotImplementedException();
 
@@ -313,9 +313,10 @@ namespace IcarusDataMiner.Miners
 								deepOrePos[i] = $"{deepOre.Position.X},{deepOre.Position.Y},{deepOre.Position.Z}";
 							}
 
+							string ores = $"{cave.Template.OreData[0].Pool},{cave.Template.OreData[0].Count},{(cave.Template.OreData.Count > 1 ? $"{cave.Template.OreData[1].Pool},{cave.Template.OreData[1].Count}" : ",")}";
 							string spawners = $"{cave.Template.BeeCount.Min},{cave.Template.BeeCount.Max},{cave.Template.LandSharkCount.Min},{cave.Template.LandSharkCount.Max},{cave.Template.SpiderCount.Min},{cave.Template.SpiderCount.Max},{cave.Template.VesperCount.Min},{cave.Template.VesperCount.Max},{cave.Template.WormCount.Min},{cave.Template.WormCount.Max}";
 
-							writer.WriteLine($"{cave.QuadName},{cave.QuadName[0]}-{cave.ID},{cave.Template.Name},{cave.Template.OreData[0].Pool},{cave.Template.OreData[0].Count},{cave.Template.ExoticCount},{cave.DeepOreLocations.Count},{deepOrePos[0]},{deepOrePos[1]},{deepOrePos[2]},{spawners},{cave.Template.TotalLakeCount},{cave.Template.WaterCount},{cave.Template.LavaCount},{cave.Template.MushroomCount},{entrance.Position.X},{entrance.Position.Y},{entrance.Position.Z},{entrance.Rotation.Yaw},{worldData.GetGridCell(entrance.Position)}");
+							writer.WriteLine($"{cave.QuadName},{cave.QuadName[0]}-{cave.ID},{cave.Template.Name},{ores},{cave.Template.ExoticCount},{cave.DeepOreLocations.Count},{deepOrePos[0]},{deepOrePos[1]},{deepOrePos[2]},{spawners},{cave.Template.TotalLakeCount},{cave.Template.WaterCount},{cave.Template.LavaCount},{cave.Template.MushroomCount},{entrance.Position.X},{entrance.Position.Y},{entrance.Position.Z},{entrance.Rotation.Yaw},{worldData.GetGridCell(entrance.Position)}");
 						}
 					}
 				}
