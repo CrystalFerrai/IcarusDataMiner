@@ -87,9 +87,6 @@ namespace IcarusDataMiner.Miners
 			{
 				if (FileSystemName.MatchesSimpleExpression("Icarus/Content/BP/World/CaveEntrances/*.uasset", pair.Key))
 				{
-					Package package = (Package)providerManager.AssetProvider.LoadPackage(pair.Value);
-
-
 					yield return $"{pair.Value.NameWithoutExtension}_C";
 				}
 			}

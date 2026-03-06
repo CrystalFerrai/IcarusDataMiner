@@ -138,4 +138,64 @@ namespace IcarusDataMiner
 			throw new NotImplementedException();
 		}
 	}
+
+	/// <summary>
+	/// When using JsonConvert.DeserializeObject on any object which may contain a FVector2D, this converter is needed because
+	/// FVector2D members cannot be set after contruction.
+	/// </summary>
+	internal class FColorJsonConverter : JsonConverter<FColor>
+	{
+		public override bool CanRead => true;
+
+		public override bool CanWrite => false;
+
+		public static FColor ReadColor(JsonReader reader)
+		{
+			if (reader.TokenType != JsonToken.StartObject) throw new InvalidOperationException("Expected reader to be positioned on an object");
+
+			byte B = 0, G = 0, R = 0, A = 0;
+
+			while (reader.Read() && reader.TokenType != JsonToken.EndObject)
+			{
+				if (reader.TokenType != JsonToken.PropertyName) continue;
+
+				string propertyName = (string)reader.Value!;
+				reader.Read();
+
+				if (reader.TokenType != JsonToken.Integer) continue;
+
+				byte current = (byte)(long)reader.Value!;
+
+				if (string.Equals(propertyName, "B", StringComparison.InvariantCultureIgnoreCase))
+				{
+					B = current;
+				}
+				else if (string.Equals(propertyName, "G", StringComparison.InvariantCultureIgnoreCase))
+				{
+					G = current;
+				}
+				else if (string.Equals(propertyName, "R", StringComparison.InvariantCultureIgnoreCase))
+				{
+					R = current;
+				}
+				else if (string.Equals(propertyName, "A", StringComparison.InvariantCultureIgnoreCase))
+				{
+					A = current;
+				}
+			}
+
+			return new FColor(R, G, B, A);
+		}
+
+		public override FColor ReadJson(JsonReader reader, Type objectType, FColor existingValue, bool hasExistingValue, JsonSerializer serializer)
+		{
+			return ReadColor(reader);
+		}
+
+		public override void WriteJson(JsonWriter writer, FColor value, JsonSerializer serializer)
+		{
+			// This could be implemented, but there is currently no use case for it.
+			throw new NotImplementedException();
+		}
+	}
 }

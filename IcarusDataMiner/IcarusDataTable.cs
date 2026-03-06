@@ -12,7 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+using CUE4Parse.UE4.Assets.Exports;
+using CUE4Parse.UE4.Assets.Objects;
 using CUE4Parse.UE4.Objects.Core.i18N;
+using CUE4Parse.UE4.Objects.Core.Math;
+using CUE4Parse.UE4.Objects.UObject;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using System.Collections;
@@ -90,7 +94,11 @@ namespace IcarusDataMiner
 
 		public static IcarusDataTable<T> DeserializeTable(string name, string json)
 		{
-			JsonSerializerSettings settings = new JsonSerializerSettings { Context = new StreamingContext(StreamingContextStates.Other, name) };
+			JsonSerializerSettings settings = new();
+			settings.Context = new StreamingContext(StreamingContextStates.Other, new DataTableSerializerContext(name, settings));
+			settings.Converters.Add(new FColorJsonConverter());
+			settings.Converters.Add(new FVector2DJsonConverter());
+
 			IcarusDataTable<T> table = JsonConvert.DeserializeObject<IcarusDataTable<T>>(json, settings) ?? throw new FormatException($"Failed to load data table {name}");
 
 			return table;
@@ -172,6 +180,31 @@ namespace IcarusDataMiner
 				RowName = "Invalid",
 				DataTableName = "Invalid"
 			};
+		}
+
+		public static FRowHandle FromProperty(FPropertyTag property, string? defaultDataTableName = null)
+		{
+			FRowHandle handle = new()
+			{
+				DataTableName = defaultDataTableName ?? "None"
+			};
+
+			UScriptStruct obj = (UScriptStruct)property.Tag!.GetValue(typeof(UScriptStruct))!;
+			FStructFallback strct = (FStructFallback)obj.StructType;
+			foreach (var prop in strct.Properties)
+			{
+				switch (prop.Name.Text)
+				{
+					case nameof(RowName):
+						handle.RowName = ((FName)prop.Tag!.GetValue(typeof(FName))!).Text;
+						break;
+					case nameof(DataTableName):
+						handle.DataTableName = ((FName)prop.Tag!.GetValue(typeof(FName))!).Text;
+						break;
+				}
+			}
+
+			return handle;
 		}
 
 		public readonly bool TryResolve<T>(DataTables dataTables, [NotNullWhen(true)] out T? row) where T : IDataTableRow
@@ -355,11 +388,26 @@ namespace IcarusDataMiner
 		}
 	}
 
+	internal class DataTableSerializerContext
+	{
+		public string TableName { get; }
+
+		public JsonSerializerSettings SerializerSettings { get; }
+
+		public DataTableSerializerContext(string tableName, JsonSerializerSettings serializerSettings)
+		{
+			TableName = tableName;
+			SerializerSettings = serializerSettings;
+		}
+	}
+
 	/// <summary>
 	/// IcarusDataTable deserializer that applies proper default values for row properties that are not specified
 	/// </summary>
 	internal class IcarusDataTableConverter : JsonConverter
 	{
+		public static JsonSerializerSettings SerializerSettings { get; }
+
 		public override bool CanWrite => false;
 
 		public override bool CanConvert(Type typeToConvert)
@@ -374,11 +422,14 @@ namespace IcarusDataMiner
 				return null;
 			}
 
-			IcarusDataTable table = Activator.CreateInstance(objectType) as IcarusDataTable ?? throw new MissingMethodException($"Type {objectType} has no default constructor");
-			if (serializer.Context.Context is string tableName)
+			DataTableSerializerContext? context = serializer.Context.Context as DataTableSerializerContext;
+			if (context is null)
 			{
-				table.Name = tableName;
+				throw new JsonSerializationException("DataTableSerializerContext is required to deserialize IcarusDataTable");
 			}
+
+			IcarusDataTable table = Activator.CreateInstance(objectType) as IcarusDataTable ?? throw new MissingMethodException($"Type {objectType} has no default constructor");
+			table.Name = context.TableName;
 
 			Type rowType = objectType.GetGenericArguments()[0];
 
@@ -462,9 +513,15 @@ namespace IcarusDataMiner
 											{
 												field.SetValue(targetRow, prop.Value.ToObject(field.FieldType));
 											}
+											else if (field.FieldType == typeof(FColor))
+											{
+												// FColor fields are readonly, so we need to create a new one instead of populating an existing one
+												field.SetValue(targetRow, serializer.Deserialize(prop.Value.CreateReader(), typeof(FColor)));
+											}
 											else
 											{
-												JsonConvert.PopulateObject(prop.Value.ToString(), targetField);
+												// PopulateObject will only set fields that are defined in the json, leaving the rest of the object with the defaults
+												JsonConvert.PopulateObject(prop.Value.ToString(), targetField, context.SerializerSettings);
 												field.SetValue(targetRow, targetField);
 											}
 										}

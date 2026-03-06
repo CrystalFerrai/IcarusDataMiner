@@ -21,7 +21,7 @@ using CUE4Parse.UE4.Objects.Engine;
 using CUE4Parse.UE4.Objects.UObject;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
-using System.Diagnostics.CodeAnalysis;
+using System.IO.Enumeration;
 
 namespace IcarusDataMiner.Miners
 {
@@ -39,6 +39,8 @@ namespace IcarusDataMiner.Miners
 			IReadOnlyDictionary<string, ISet<QuestLocation>> tagLocations = FindQuestMarkers(providerManager, logger);
 			QuestLocationQueryData locationQueryData = new(questQueriesTable, tagLocations);
 
+			QuestIconQueryData iconQueryData = QuestIconQueryData.Load(providerManager, logger);
+
 			logger.Log(LogLevel.Information, "Processing quests...");
 			List<QuestData> allQuests = new();
 			foreach (var pair in providerManager.ProspectDataUtil.ProspectsByTree)
@@ -54,12 +56,12 @@ namespace IcarusDataMiner.Miners
 
 					QuestData quest = QuestData.Create(prospect.Prospect);
 
-					ProcessQuest(quest, questsTable[mission.InitialQuest.RowName], questsTable, locationQueryData, providerManager, logger);
+					ProcessQuest(quest, questsTable[mission.InitialQuest.RowName], questsTable, locationQueryData, iconQueryData, providerManager, logger);
 					foreach (FMissionObjectiveEntry subMission in mission.MissionObjectives)
 					{
 						FQuestSetup questSetup = questsTable[subMission.QuestRow.RowName];
 						QuestData subQuest = QuestData.Create(questSetup);
-						ProcessQuest(subQuest, questSetup, questsTable, locationQueryData, providerManager, logger);
+						ProcessQuest(subQuest, questSetup, questsTable, locationQueryData, iconQueryData, providerManager, logger);
 						quest.SubQuests.Add(subQuest);
 					}
 					quests.Add(quest);
@@ -148,7 +150,7 @@ namespace IcarusDataMiner.Miners
 			return tagLocations;
 		}
 
-		private void ProcessQuest(QuestData quest, FQuestSetup questSetup, IcarusDataTable<FQuestSetup> questsTable, QuestLocationQueryData locationQueryData, IProviderManager providerManager, Logger logger)
+		private void ProcessQuest(QuestData quest, FQuestSetup questSetup, IcarusDataTable<FQuestSetup> questsTable, QuestLocationQueryData locationQueryData, QuestIconQueryData iconQueryData, IProviderManager providerManager, Logger logger)
 		{
 			if (!questSetup.LocationQuery.IsNone)
 			{
@@ -162,14 +164,14 @@ namespace IcarusDataMiner.Miners
 				return;
 			}
 
-			ProcessQuestBlueprint(bpPath, quest, questsTable, locationQueryData, providerManager, logger);
+			ProcessQuestBlueprint(bpPath, quest, questsTable, locationQueryData, iconQueryData, providerManager, logger);
 		}
 
-		private void ProcessQuestBlueprint(string bpPath, QuestData quest, IcarusDataTable<FQuestSetup> questsTable, QuestLocationQueryData locationQueryData, IProviderManager providerManager, Logger logger)
+		private void ProcessQuestBlueprint(string bpPath, QuestData quest, IcarusDataTable<FQuestSetup> questsTable, QuestLocationQueryData locationQueryData, QuestIconQueryData iconQueryData, IProviderManager providerManager, Logger logger)
 		{
 			IFileProvider provider = providerManager.AssetProvider;
 
-			if (bpPath.Equals("/Script/Icarus.Quest"))
+			if (bpPath.Equals("/Script/Icarus.Quest") || bpPath.Equals("None"))
 			{
 				// Reached base class
 				return;
@@ -186,6 +188,13 @@ namespace IcarusDataMiner.Miners
 			bool wasReadScriptData = provider.ReadScriptData;
 			provider.ReadScriptData = true;
 			Package package = (Package)provider.LoadPackage(file);
+
+			if (iconQueryData.TryFindQuestIcon(package, logger, out QuestIcon questIcon))
+			{
+				quest.Icons.Add(questIcon);
+			}
+
+			List<QuestSearchArea> searchAreas = new();
 
 			foreach (FObjectExport? export in package.ExportMap)
 			{
@@ -236,7 +245,7 @@ namespace IcarusDataMiner.Miners
 								if (questsTable.TryGetValue(nameOp.Operand, out FQuestSetup questSetup))
 								{
 									QuestData subQuest = QuestData.Create(questSetup);
-									ProcessQuest(subQuest, questSetup, questsTable, locationQueryData, providerManager, logger);
+									ProcessQuest(subQuest, questSetup, questsTable, locationQueryData, iconQueryData, providerManager, logger);
 									quest.SubQuests.Add(subQuest);
 								}
 							}
@@ -259,6 +268,34 @@ namespace IcarusDataMiner.Miners
 							{
 								ProcessPrebuiltStructureOperation(ffOp, quest, providerManager, logger);
 							}
+							else if (ffOp.Operand.Equals("KismetSystemLibrary::SetFloatPropertyByName"))
+							{
+								Operation<string?> nameOp = (Operation<string?>)ffOp.ChildOperations[1];
+								if (nameOp.Operand!.Equals("Radius"))
+								{
+									if (searchAreas.Count > 0)
+									{
+										QuestSearchArea searchArea = searchAreas[searchAreas.Count - 1];
+										if (searchArea.RadiusSet)
+										{
+											logger.Log(LogLevel.Debug, $"Multiple radius values found for search area {searchArea.RowName} in quest {quest.Name}.");
+										}
+										else
+										{
+											searchArea.RadiusSet = true;
+											if (ffOp.ChildOperations[2] is Operation<float> floatOp)
+											{
+												searchArea.Radius = (int)floatOp.Operand;
+											}
+											else
+											{
+												logger.Log(LogLevel.Warning, $"Unknown radius value in search area {searchArea.RowName} in quest {quest.Name}.");
+											}
+										}
+										searchAreas[searchAreas.Count - 1] = searchArea;
+									}
+								}
+							}
 						}
 						else if (op.OpCode == EExprToken.Context)
 						{
@@ -272,15 +309,38 @@ namespace IcarusDataMiner.Miners
 								}
 							}
 						}
+						else if (op.OpCode == EExprToken.Let)
+						{
+							Operation exprOp = op.ChildOperations[1];
+							if (exprOp.OpCode == EExprToken.StructConst && exprOp.ChildOperations.Count == 3 &&
+								exprOp.ChildOperations[0].OpCode == EExprToken.NameConst && exprOp.ChildOperations[1].OpCode == EExprToken.NameConst)
+							{
+								Operation<string?> rowNameOp = (Operation<string?>)exprOp.ChildOperations[0];
+								Operation<string?> tableNameOp = (Operation<string?>)exprOp.ChildOperations[1];
+								switch (tableNameOp.Operand)
+								{
+									case "D_MapIcons":
+										quest.Icons.Add(iconQueryData.GetQuestIcon(rowNameOp.Operand!));
+										break;
+									case "D_MapSearchArea":
+										searchAreas.Add(new() { RowName = rowNameOp.Operand! });
+										break;
+								}
+							}
+						}
 					}
 				}
 			}
+
+			quest.SearchAreas.AddRange(searchAreas);
 
 			provider.ReadScriptData = wasReadScriptData;
 		}
 
 		private static void AddQuestLocation(QuestData quest, string tableName, string rowName, QuestLocationQueryData locationQueryData, Logger logger)
 		{
+			if (rowName.Equals("None")) return;
+
 			if (!tableName.Equals(locationQueryData.QuestQueriesTable.Name))
 			{
 				logger.Log(LogLevel.Debug, $"Unexpected quest query table name: {tableName}");
@@ -390,6 +450,11 @@ namespace IcarusDataMiner.Miners
 		public int PlayerSpawnGroup { get; set; }
 
 		public Dictionary<string, HashSet<QuestLocation>> Locations { get; }
+
+		public List<QuestIcon> Icons { get; }
+
+		public List<QuestSearchArea> SearchAreas { get; }
+
 		public List<string> PrebuiltStructures { get; }
 
 		public UBlueprintGeneratedClass? QuestClass
@@ -420,6 +485,8 @@ namespace IcarusDataMiner.Miners
 		{
 			SubQuests = new();
 			Locations = new();
+			Icons = new();
+			SearchAreas = new();
 			PlayerSpawnGroup = -1;
 			PrebuiltStructures = new();
 		}
@@ -480,6 +547,38 @@ namespace IcarusDataMiner.Miners
 			{
 				writer.WritePropertyName(nameof(PlayerSpawnGroup));
 				writer.WriteValue(PlayerSpawnGroup);
+			}
+
+			if (Icons.Count > 0)
+			{
+				writer.WritePropertyName(nameof(Icons));
+				writer.WriteStartArray();
+				foreach (QuestIcon icon in Icons)
+				{
+					writer.WriteStartObject();
+					writer.WritePropertyName(nameof(QuestIcon.Name));
+					writer.WriteValue(icon.Name);
+					writer.WritePropertyName(nameof(QuestIcon.Path));
+					writer.WriteValue(icon.Path);
+					writer.WriteEndObject();
+				}
+				writer.WriteEndArray();
+			}
+
+			if (SearchAreas.Count > 0)
+			{
+				writer.WritePropertyName(nameof(SearchAreas));
+				writer.WriteStartArray();
+				foreach (QuestSearchArea searchArea in SearchAreas)
+				{
+					writer.WriteStartObject();
+					writer.WritePropertyName(nameof(QuestSearchArea.RowName));
+					writer.WriteValue(searchArea.RowName);
+					writer.WritePropertyName(nameof(QuestSearchArea.Radius));
+					writer.WriteValue(searchArea.Radius);
+					writer.WriteEndObject();
+				}
+				writer.WriteEndArray();
 			}
 
 			WriteProperties(writer);
@@ -564,6 +663,166 @@ namespace IcarusDataMiner.Miners
 		}
 	}
 
+	internal class QuestIconQueryData
+	{
+		private const string SearchAreaComponentName = "BPQC_SearchArea_C";
+		private const string MapIconComponentName = "IcarusMapIconComponent";
+		private const string SearchAreaActorName = "BP_MapSearchArea_C";
+		private const string CustomSearchAreaActorName = "BP_MapSearchArea_Custom_C";
+
+		// Not currently used. Might implement later
+		private QuestIcon mDefaultSearchAreaIcon;
+
+		private IcarusDataTable<FMapIconsData> mMapIconsTable;
+
+		private IDictionary<string, QuestIcon> mLocationMarkerActorIcons;
+
+		private QuestIconQueryData(IcarusDataTable<FMapIconsData> mapIconsTable, IDictionary<string, QuestIcon> locationMarkerActorIcons, QuestIcon defaultSearchAreaIcon)
+		{
+			mMapIconsTable = mapIconsTable;
+			mLocationMarkerActorIcons = locationMarkerActorIcons;
+			mDefaultSearchAreaIcon = defaultSearchAreaIcon;
+		}
+
+		public static QuestIconQueryData Load(IProviderManager providerManager, Logger logger)
+		{
+			IcarusDataTable<FMapIconsData> mapIconsTable = DataTables.LoadDataTable<FMapIconsData>(providerManager.DataProvider, "UI/D_MapIcons.json");
+			Dictionary<string, QuestIcon> locationMarkerActorIcons = new();
+			
+			QuestIcon defaultSearchAreaIcon = new();
+			QuestSearchArea defaultSearchArea = new();
+
+			foreach (var pair in providerManager.AssetProvider.Files)
+			{
+				if (FileSystemName.MatchesSimpleExpression("Icarus/Content/BP/LocationMarkers/*.uasset", pair.Key))
+				{
+					Package package = (Package)providerManager.AssetProvider.LoadPackage(pair.Value);
+
+					string className = $"{Path.GetFileNameWithoutExtension(pair.Key)}_C";
+					if (className.Equals(SearchAreaActorName))
+					{
+						foreach (FObjectExport export in package.ExportMap)
+						{
+							if (export.ClassName.Equals(MapIconComponentName))
+							{
+								if (TryGetIconFromComponent(export.ExportObject.Value, mapIconsTable, out QuestIcon icon))
+								{
+									defaultSearchAreaIcon = icon;
+								}
+								else
+								{
+									logger.Log(LogLevel.Debug, $"Could not find MapIconData property for {export.ObjectName} in {pair.Key}");
+								}
+							}
+							else if (export.ClassName.Equals(SearchAreaComponentName))
+							{
+								QuestSearchArea searchArea = new();
+								foreach (FPropertyTag property in export.ExportObject.Value.Properties)
+								{
+									if (property.Name.Text.Equals("SearchArea"))
+									{
+										searchArea.RowName = FRowHandle.FromProperty(property, "D_MapSearchArea").RowName;
+									}
+									else if (property.Name.Text.Equals("Radius"))
+									{
+										searchArea.Radius = (int)property.Tag!.GetValue(typeof(int))!;
+									}
+								}
+								defaultSearchArea = searchArea;
+							}
+						}
+					}
+					else if (className.Equals(CustomSearchAreaActorName))
+					{
+						// Not handling this since it only has 1 use case in game and is complicated
+					}
+					else
+					{
+						foreach (FObjectExport export in package.ExportMap)
+						{
+							if (export.ClassName.Equals(MapIconComponentName))
+							{
+								if (TryGetIconFromComponent(export.ExportObject.Value, mapIconsTable, out QuestIcon icon))
+								{
+									locationMarkerActorIcons.Add(className, icon);
+								}
+								else
+								{
+									logger.Log(LogLevel.Debug, $"Could not find MapIconData property for {export.ObjectName} in {pair.Key}");
+								}
+							}
+						}
+					}
+				}
+			}
+
+			return new(mapIconsTable, locationMarkerActorIcons, defaultSearchAreaIcon);
+		}
+
+		public bool TryFindQuestIcon(Package questPackage, Logger logger, out QuestIcon icon)
+		{
+			foreach (FObjectExport export in questPackage.ExportMap)
+			{
+				switch (export.ClassName)
+				{
+					case MapIconComponentName:
+						if (TryGetIconFromComponent(export.ExportObject.Value, mMapIconsTable, out icon))
+						{
+							return true;
+						}
+						logger.Log(LogLevel.Debug, $"Could not find MapIconData property for {export.ObjectName} in {questPackage.Name}");
+						break;
+					default:
+						if (mLocationMarkerActorIcons.TryGetValue(export.ClassName, out icon))
+						{
+							return true;
+						}
+						break;
+				}
+			}
+
+			icon = default;
+			return false;
+		}
+
+		public QuestIcon GetQuestIcon(string rowName)
+		{
+			FMapIconsData iconData;
+			if (mMapIconsTable.TryGetValue(rowName, out iconData))
+			{
+				return new QuestIcon { Name = rowName, Path = iconData.MapIcon.GetAssetPath() ?? "None" };
+			}
+			else
+			{
+				return new QuestIcon { Name = rowName, Path = "None" };
+			}
+		}
+
+		private static bool TryGetIconFromComponent(UObject component, IcarusDataTable<FMapIconsData> mapIconsTable, out QuestIcon icon)
+		{
+			FPropertyTag? iconProperty = component.Properties.FirstOrDefault(p => p.Name.Text.Equals("MapIconData"));
+			if (iconProperty is null)
+			{
+				icon = default;
+				return false;
+			}
+
+			FRowHandle row = FRowHandle.FromProperty(iconProperty, "D_MapIcons");
+
+			FMapIconsData iconData;
+			if (mapIconsTable.TryGetValue(row.RowName, out iconData))
+			{
+				icon = new QuestIcon { Name = row.RowName, Path = iconData.MapIcon.GetAssetPath() ?? "None" };
+			}
+			else
+			{
+				icon = new QuestIcon { Name = row.RowName, Path = "None" };
+			}
+
+			return true;
+		}
+	}
+
 	internal struct QuestLocation
 	{
 		public string Map;
@@ -577,6 +836,28 @@ namespace IcarusDataMiner.Miners
 		public override bool Equals(object? obj)
 		{
 			return obj is QuestLocation other && Map.Equals(other.Map) && Location.Equals(other.Location);
+		}
+	}
+
+	internal struct QuestIcon
+	{
+		public string Name;
+		public string Path;
+	}
+
+	internal struct QuestSearchArea
+	{
+		public string RowName;
+		public int Radius;
+
+		public bool RadiusSet;
+
+		public QuestSearchArea()
+		{
+			// Defaults from BPQC_SearchArea
+			RowName = "SpawnBlocker";
+			Radius = 1000;
+			RadiusSet = false;
 		}
 	}
 
@@ -628,6 +909,27 @@ namespace IcarusDataMiner.Miners
 		public JObject? Metadata { get; set; }
 
 		public FGameplayTagQuery Query;
+	};
+
+	internal struct FMapIconsData : IDataTableRow
+	{
+		public string Name { get; set; }
+		public JObject? Metadata { get; set; }
+
+		public ObjectPointer WidgetClass;
+		public ObjectPointer MapIcon;
+		public FColor Color;
+		public FRowEnum RequiredPlayerStatToShow;
+		public FRowEnum RequiredActorStatToShow;
+		public bool RequireOwnershipToShow;
+		public float ZOrder;
+		public float ScaleFactor;
+		public bool GetsRotation;
+		public FVector2D BrushSize;
+		public bool UpdateOnTick;
+		public bool bDisplayOnCompass;
+		public int MaxCompassDisplayDistance;
+		public ObjectPointer CompassWidgetClass;
 	};
 
 	internal struct FMissionObjectiveEntry
