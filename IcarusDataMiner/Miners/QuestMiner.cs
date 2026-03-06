@@ -21,6 +21,7 @@ using CUE4Parse.UE4.Objects.Engine;
 using CUE4Parse.UE4.Objects.UObject;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using System.Diagnostics.CodeAnalysis;
 
 namespace IcarusDataMiner.Miners
 {
@@ -35,7 +36,7 @@ namespace IcarusDataMiner.Miners
 
 			logger.Log(LogLevel.Information, "Locating quest markers...");
 			IcarusDataTable<FQuestQueries> questQueriesTable = DataTables.LoadDataTable<FQuestQueries>(providerManager.DataProvider, "Quests/D_QuestQueries.json");
-			IReadOnlyDictionary<string, IList<QuestLocation>> tagLocations = FindQuestMarkers(providerManager, logger);
+			IReadOnlyDictionary<string, ISet<QuestLocation>> tagLocations = FindQuestMarkers(providerManager, logger);
 			QuestLocationQueryData locationQueryData = new(questQueriesTable, tagLocations);
 
 			logger.Log(LogLevel.Information, "Processing quests...");
@@ -72,9 +73,9 @@ namespace IcarusDataMiner.Miners
 			return true;
 		}
 
-		private IReadOnlyDictionary<string, IList<QuestLocation>> FindQuestMarkers(IProviderManager providerManager, Logger logger)
+		private IReadOnlyDictionary<string, ISet<QuestLocation>> FindQuestMarkers(IProviderManager providerManager, Logger logger)
 		{
-			Dictionary<string, IList<QuestLocation>> tagLocations = new();
+			Dictionary<string, ISet<QuestLocation>> tagLocations = new();
 
 			foreach (WorldData world in providerManager.WorldDataUtil.Rows)
 			{
@@ -133,10 +134,10 @@ namespace IcarusDataMiner.Miners
 
 					foreach (FName tag in tags.GameplayTags)
 					{
-						IList<QuestLocation>? locations;
+						ISet<QuestLocation>? locations;
 						if (!tagLocations.TryGetValue(tag.Text, out locations))
 						{
-							locations = new List<QuestLocation>();
+							locations = new HashSet<QuestLocation>();
 							tagLocations.Add(tag.Text, locations);
 						}
 						locations.Add(new() { Map = world.Name!, Location = location });
@@ -294,16 +295,19 @@ namespace IcarusDataMiner.Miners
 
 			foreach (FGameplayTag tag in queryValue.Query.TagDictionary)
 			{
-				List<QuestLocation>? list;
+				HashSet<QuestLocation>? list;
 				if (!quest.Locations.TryGetValue(tag.TagName, out list))
 				{
 					list = new();
 					quest.Locations.Add(tag.TagName, list);
 				}
 
-				if (locationQueryData.TagLocations.TryGetValue(tag.TagName, out IList<QuestLocation>? values))
+				if (locationQueryData.TagLocations.TryGetValue(tag.TagName, out ISet<QuestLocation>? values))
 				{
-					list.AddRange(values);
+					foreach (QuestLocation location in values)
+					{
+						list.Add(location);
+					}
 				}
 			}
 		}
@@ -385,7 +389,7 @@ namespace IcarusDataMiner.Miners
 
 		public int PlayerSpawnGroup { get; set; }
 
-		public Dictionary<string, List<QuestLocation>> Locations { get; }
+		public Dictionary<string, HashSet<QuestLocation>> Locations { get; }
 		public List<string> PrebuiltStructures { get; }
 
 		public UBlueprintGeneratedClass? QuestClass
@@ -551,9 +555,9 @@ namespace IcarusDataMiner.Miners
 	{
 		public IcarusDataTable<FQuestQueries> QuestQueriesTable { get; }
 
-		public IReadOnlyDictionary<string, IList<QuestLocation>> TagLocations { get; }
+		public IReadOnlyDictionary<string, ISet<QuestLocation>> TagLocations { get; }
 
-		public QuestLocationQueryData(IcarusDataTable<FQuestQueries> questQueriesTable, IReadOnlyDictionary<string, IList<QuestLocation>> tagLocations)
+		public QuestLocationQueryData(IcarusDataTable<FQuestQueries> questQueriesTable, IReadOnlyDictionary<string, ISet<QuestLocation>> tagLocations)
 		{
 			QuestQueriesTable = questQueriesTable;
 			TagLocations = tagLocations;
@@ -564,6 +568,16 @@ namespace IcarusDataMiner.Miners
 	{
 		public string Map;
 		public FVector Location;
+
+		public override int GetHashCode()
+		{
+			return HashCode.Combine(Map, Location);
+		}
+
+		public override bool Equals(object? obj)
+		{
+			return obj is QuestLocation other && Map.Equals(other.Map) && Location.Equals(other.Location);
+		}
 	}
 
 #pragma warning disable CS0649 // Field never assigned to
