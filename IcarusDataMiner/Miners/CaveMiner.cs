@@ -17,7 +17,6 @@ using CUE4Parse.UE4.Assets;
 using CUE4Parse.UE4.Assets.Exports;
 using CUE4Parse.UE4.Assets.Objects;
 using CUE4Parse.UE4.Objects.Core.Math;
-using CUE4Parse.UE4.Objects.GameplayTags;
 using CUE4Parse.UE4.Objects.UObject;
 using Newtonsoft.Json.Linq;
 using SkiaSharp;
@@ -39,7 +38,7 @@ namespace IcarusDataMiner.Miners
 
 		static CaveMiner()
 		{
-			sCaveIdRegex = new Regex(@"BP_Cave(?:Prefab)?(?:_C_)*(\d*).*");
+			sCaveIdRegex = new Regex(@"BP_Cave(?:Prefab)?(?:_C)?_?(\d*).*");
 		}
 
 		public bool Run(IProviderManager providerManager, Config config, Logger logger)
@@ -51,6 +50,8 @@ namespace IcarusDataMiner.Miners
 			IcarusDataTable<FWaterSetup> waterSetupTable = IcarusDataTable<FWaterSetup>.DeserializeTable("D_WaterSetup", Encoding.UTF8.GetString(waterSetupFile.Read()));
 
 			const string TemplateMatch = "Icarus/Content/Prefabs/Cave/*.uasset";
+
+			HashSet<string> customEntranceTypes = new(FindCustomCaveEntranceTypes(providerManager, logger));
 
 			foreach (var pair in providerManager.AssetProvider.Files)
 			{
@@ -74,10 +75,24 @@ namespace IcarusDataMiner.Miners
 				if (!providerManager.AssetProvider.Files.TryGetValue(packageName, out packageFile)) continue;
 
 				logger.Log(LogLevel.Information, $"Processing {packageFile.NameWithoutExtension}...");
-				ExportCaves(packageFile, templates, providerManager, world, config, logger);
+				ExportCaves(packageFile, templates, customEntranceTypes, providerManager, world, config, logger);
 			}
 
 			return true;
+		}
+
+		private IEnumerable<string> FindCustomCaveEntranceTypes(IProviderManager providerManager, Logger logger)
+		{
+			foreach (var pair in providerManager.AssetProvider.Files)
+			{
+				if (FileSystemName.MatchesSimpleExpression("Icarus/Content/BP/World/CaveEntrances/*.uasset", pair.Key))
+				{
+					Package package = (Package)providerManager.AssetProvider.LoadPackage(pair.Value);
+
+
+					yield return $"{pair.Value.NameWithoutExtension}_C";
+				}
+			}
 		}
 
 		private CaveTemplate? LoadCaveTemplate(GameFile templateAsset, IProviderManager providerManager, IcarusDataTable<FWaterSetup> waterSetupTable, Config config, Logger logger)
@@ -260,7 +275,7 @@ namespace IcarusDataMiner.Miners
 			return result;
 		}
 
-		private void ExportCaves(GameFile mapAsset, IReadOnlyDictionary<string, CaveTemplate> templates, IProviderManager providerManager, WorldData worldData, Config config, Logger logger)
+		private void ExportCaves(GameFile mapAsset, IReadOnlyDictionary<string, CaveTemplate> templates, ISet<string> customEntranceTypes, IProviderManager providerManager, WorldData worldData, Config config, Logger logger)
 		{
 			Package mapPackage = (Package)providerManager.AssetProvider.LoadPackage(mapAsset);
 
@@ -278,7 +293,7 @@ namespace IcarusDataMiner.Miners
 				logger.Log(LogLevel.Debug, $"Searching {packageFile.NameWithoutExtension}");
 
 				string quadName = packageFile.NameWithoutExtension.Substring(packageFile.NameWithoutExtension.LastIndexOf('_') + 1);
-				foreach (CaveData cave in FindCaves(packageFile, quadName, templates, providerManager, config, logger))
+				foreach (CaveData cave in FindCaves(packageFile, quadName, templates, customEntranceTypes, providerManager, config, logger))
 				{
 					if (cave.Template != null) templateCaves.Add(cave);
 					else customCaves.Add(cave);
@@ -380,7 +395,7 @@ namespace IcarusDataMiner.Miners
 
 						foreach (CaveData cave in customCaves)
 						{
-							writer.Write($"{cave.QuadName},{cave.ID}");
+							writer.Write($"{cave.QuadName},{(cave.Name is null ? cave.ID : cave.Name)}");
 							Action<int, IList<CaveEntranceData>> writeEntrances = (max, entrances) =>
 							{
 								for (int i = 0; i < max; ++i)
@@ -418,13 +433,14 @@ namespace IcarusDataMiner.Miners
 			}
 		}
 
-		private IEnumerable<CaveData> FindCaves(GameFile mapAsset, string quadName, IReadOnlyDictionary<string, CaveTemplate> templates, IProviderManager providerManager, Config config, Logger logger)
+		private IEnumerable<CaveData> FindCaves(GameFile mapAsset, string quadName, IReadOnlyDictionary<string, CaveTemplate> templates, ISet<string> customCaveEntranceTypeNames, IProviderManager providerManager, Config config, Logger logger)
 		{
 			CaveTemplate defaultTemplate = new CaveTemplate() { Name = "Unknown" };
 
 			Package mapPackage = (Package)providerManager.AssetProvider.LoadPackage(mapAsset);
 
 			int templateCaveTypeNameIndex = -1, customCaveTypeNameIndex = -1, prefabAssetNameIndex = -1, caveEntranceNameIndex = -1, instanceComponentsIndex = -1, entranceRefsIndex = -1, rootComponentIndex = -1, relativeLocationIndex = -1, relativeRotationIndex = -1, attachParentIndex = -1;
+			HashSet<int> customCaveEntranceNameIndices = new();
 			for (int i = 0; i < mapPackage.NameMap.Length; ++i)
 			{
 				FNameEntrySerialized name = mapPackage.NameMap[i];
@@ -460,12 +476,19 @@ namespace IcarusDataMiner.Miners
 					case "AttachParent":
 						attachParentIndex = i;
 						break;
+					default:
+						if (name.Name is not null && customCaveEntranceTypeNames.Contains(name.Name))
+						{
+							customCaveEntranceNameIndices.Add(i);
+						}
+						break;
 				}
 			}
 
-			if (templateCaveTypeNameIndex < 0 && customCaveTypeNameIndex < 0) yield break; // No caves
+			if (templateCaveTypeNameIndex < 0 && customCaveTypeNameIndex < 0 && customCaveEntranceNameIndices.Count == 0) yield break; // No caves
 
 			int templateCaveTypeIndex = -1, customCaveTypeIndex = -1, caveEntranceTypeIndex = -1;
+			HashSet<int> customCaveEntranceTypeIndices = new();
 			for (int i = 0; i < mapPackage.ImportMap.Length; ++i)
 			{
 				if (mapPackage.ImportMap[i].ObjectName.Index == templateCaveTypeNameIndex)
@@ -479,6 +502,10 @@ namespace IcarusDataMiner.Miners
 				else if (mapPackage.ImportMap[i].ObjectName.Index == caveEntranceNameIndex)
 				{
 					caveEntranceTypeIndex = ~i;
+				}
+				else if (customCaveEntranceNameIndices.Contains(mapPackage.ImportMap[i].ObjectName.Index))
+				{
+					customCaveEntranceTypeIndices.Add(~i);
 				}
 			}
 
@@ -510,22 +537,34 @@ namespace IcarusDataMiner.Miners
 				if (export == null) continue;
 
 				if ((templateCaveTypeNameIndex < 0 || export.ClassIndex.Index != templateCaveTypeIndex) &&
-					(customCaveTypeNameIndex < 0 || export.ClassIndex.Index != customCaveTypeIndex))
+					(customCaveTypeNameIndex < 0 || export.ClassIndex.Index != customCaveTypeIndex) &&
+					!customCaveEntranceTypeIndices.Contains(export.ClassIndex.Index))
 				{
 					continue;
 				}
 
 				UObject caveObject = export.ExportObject.Value;
 
-				Match match = sCaveIdRegex.Match(caveObject.Name);
-				if (!match.Success)
-				{
-					logger.Log(LogLevel.Warning, $"Error parsing cave name {caveObject.Name} in {mapAsset.NameWithoutExtension}. Cave will be skipped");
-					continue;
-				}
-
 				CaveData caveData = new(quadName);
-				caveData.ID = match.Groups[1].Value.Length > 0 ? int.Parse(match.Groups[1].Value) : 0;
+
+				if (caveObject.Name.StartsWith("BP_CaveEntrance_"))
+				{
+					caveData.Name = caveObject.Name["BP_CaveEntrance_".Length..];
+				}
+				else
+				{
+					Match match = sCaveIdRegex.Match(caveObject.Name);
+					if (match.Success)
+					{
+						if (caveObject.Name.StartsWith("BP_CaveEntrance")) System.Diagnostics.Debugger.Break();
+						caveData.ID = match.Groups[1].Value.Length > 0 ? int.Parse(match.Groups[1].Value) : 0;
+					}
+					else
+					{
+						logger.Log(LogLevel.Debug, $"Error parsing cave ID from name {caveObject.Name} in {mapAsset.NameWithoutExtension}. Will output name instead.");
+						caveData.Name = caveObject.Name;
+					}
+				}
 
 				for (int i = 0; i < caveObject.Properties.Count; ++i)
 				{
@@ -639,6 +678,16 @@ namespace IcarusDataMiner.Miners
 					entrance.Location = entranceLocation;
 				}
 
+				if (customCaveEntranceTypeIndices.Contains(export.ClassIndex.Index))
+				{
+					// Need to flip these custom entrances around to be consistent with other cave entrance rotations
+					Locator entranceLocation = caveData.Location;
+					entranceLocation.Rotation.Yaw += 180.0f;
+					entranceLocation.Rotation.Normalize();
+
+					caveData.Entrances.Add(new(caveData.RootComponent) { Location = entranceLocation });
+				}
+
 				if (caveData.Template is not null)
 				{
 					// Convert deep ore locations from local space to world space and add to cave data
@@ -659,6 +708,8 @@ namespace IcarusDataMiner.Miners
 			public string QuadName { get; }
 
 			public int ID { get; set; }
+
+			public string? Name { get; set; }
 
 			public CaveTemplate? Template { get; set; }
 
@@ -684,7 +735,13 @@ namespace IcarusDataMiner.Miners
 				int quadCompare = QuadName.CompareTo(other.QuadName);
 				if (quadCompare != 0) return quadCompare;
 
-				return ID.CompareTo(other.ID);
+				int idCompare = ID.CompareTo(other.ID);
+				if (idCompare != 0) return idCompare;
+
+				if (Name is not null) return Name.CompareTo(other.Name);
+				if (other.Name is not null) return -1;
+
+				return 0;
 			}
 
 			public override string ToString()
