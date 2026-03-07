@@ -556,10 +556,25 @@ namespace IcarusDataMiner.Miners
 				foreach (QuestIcon icon in Icons)
 				{
 					writer.WriteStartObject();
+
 					writer.WritePropertyName(nameof(QuestIcon.Name));
 					writer.WriteValue(icon.Name);
+
 					writer.WritePropertyName(nameof(QuestIcon.Path));
 					writer.WriteValue(icon.Path);
+
+					writer.WritePropertyName(nameof(QuestIcon.Color));
+					writer.WriteStartObject();
+					writer.WritePropertyName(nameof(QuestIcon.Color.R));
+					writer.WriteValue(icon.Color.R);
+					writer.WritePropertyName(nameof(QuestIcon.Color.G));
+					writer.WriteValue(icon.Color.G);
+					writer.WritePropertyName(nameof(QuestIcon.Color.B));
+					writer.WriteValue(icon.Color.B);
+					writer.WritePropertyName(nameof(QuestIcon.Color.A));
+					writer.WriteValue(icon.Color.A);
+					writer.WriteEndObject();
+
 					writer.WriteEndObject();
 				}
 				writer.WriteEndArray();
@@ -572,10 +587,13 @@ namespace IcarusDataMiner.Miners
 				foreach (QuestSearchArea searchArea in SearchAreas)
 				{
 					writer.WriteStartObject();
+
 					writer.WritePropertyName(nameof(QuestSearchArea.RowName));
 					writer.WriteValue(searchArea.RowName);
+
 					writer.WritePropertyName(nameof(QuestSearchArea.Radius));
 					writer.WriteValue(searchArea.Radius);
+
 					writer.WriteEndObject();
 				}
 				writer.WriteEndArray();
@@ -670,12 +688,19 @@ namespace IcarusDataMiner.Miners
 		private const string SearchAreaActorName = "BP_MapSearchArea_C";
 		private const string CustomSearchAreaActorName = "BP_MapSearchArea_Custom_C";
 
+		private static readonly FColor White;
+
 		// Not currently used. Might implement later
 		private QuestIcon mDefaultSearchAreaIcon;
 
 		private IcarusDataTable<FMapIconsData> mMapIconsTable;
 
 		private IDictionary<string, QuestIcon> mLocationMarkerActorIcons;
+
+		static QuestIconQueryData()
+		{
+			White = new(255, 255, 255, 255);
+		}
 
 		private QuestIconQueryData(IcarusDataTable<FMapIconsData> mapIconsTable, IDictionary<string, QuestIcon> locationMarkerActorIcons, QuestIcon defaultSearchAreaIcon)
 		{
@@ -790,11 +815,11 @@ namespace IcarusDataMiner.Miners
 			FMapIconsData iconData;
 			if (mMapIconsTable.TryGetValue(rowName, out iconData))
 			{
-				return new QuestIcon { Name = rowName, Path = iconData.MapIcon.GetAssetPath() ?? "None" };
+				return new QuestIcon { Name = rowName, Path = iconData.MapIcon.GetAssetPath() ?? "None", Color = iconData.Color };
 			}
 			else
 			{
-				return new QuestIcon { Name = rowName, Path = "None" };
+				return new QuestIcon { Name = rowName, Path = "None", Color = White };
 			}
 		}
 
@@ -812,11 +837,11 @@ namespace IcarusDataMiner.Miners
 			FMapIconsData iconData;
 			if (mapIconsTable.TryGetValue(row.RowName, out iconData))
 			{
-				icon = new QuestIcon { Name = row.RowName, Path = iconData.MapIcon.GetAssetPath() ?? "None" };
+				icon = new QuestIcon { Name = row.RowName, Path = iconData.MapIcon.GetAssetPath() ?? "None", Color = iconData.Color };
 			}
 			else
 			{
-				icon = new QuestIcon { Name = row.RowName, Path = "None" };
+				icon = new QuestIcon { Name = row.RowName, Path = "None", Color = White };
 			}
 
 			return true;
@@ -843,6 +868,7 @@ namespace IcarusDataMiner.Miners
 	{
 		public string Name;
 		public string Path;
+		public FColor Color;
 	}
 
 	internal struct QuestSearchArea
