@@ -1,4 +1,4 @@
-﻿// Copyright 2022 Crystal Ferrai
+﻿// Copyright 2026 Crystal Ferrai
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -75,6 +75,60 @@ namespace IcarusDataMiner
 			OnPostLog(level, message);
 		}
 
+		/// <summary>
+		/// Logs a completely empty line at a specific level
+		/// </summary>
+		public void LogEmptyLine(LogLevel level)
+		{
+			if (level < LogLevel) return;
+
+			OnPreLog(level, string.Empty);
+
+			mWriters[(int)level].WriteLine(string.Empty);
+
+			OnPostLog(level, string.Empty);
+		}
+
+		/// <summary>
+		/// Helper for logging a debug message
+		/// </summary>
+		public void Debug(string message)
+		{
+			Log(LogLevel.Debug, message);
+		}
+
+		/// <summary>
+		/// Helper for logging an information message
+		/// </summary>
+		public void Information(string message)
+		{
+			Log(LogLevel.Information, message);
+		}
+
+		/// <summary>
+		/// Helper for logging an important message
+		/// </summary>
+		public void Important(string message)
+		{
+			Log(LogLevel.Important, message);
+		}
+
+		/// <summary>
+		/// Helper for logging a warning
+		/// </summary>
+		public void Warning(string message)
+		{
+			Log(LogLevel.Warning, message);
+		}
+
+		/// <summary>
+		/// Helper for logging an error
+		/// </summary>
+		public void Error(string message)
+		{
+			Log(LogLevel.Error, message);
+		}
+
 		protected virtual void OnPreLog(LogLevel level, string message)
 		{
 		}
@@ -139,7 +193,7 @@ namespace IcarusDataMiner
 		/// </summary>
 		Verbose,
 		/// <summary>
-		/// For debugging messages that will only print ina  debug build by default
+		/// For debugging messages that will only print in a debug build by default
 		/// </summary>
 		Debug,
 		/// <summary>
