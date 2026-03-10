@@ -51,7 +51,8 @@ namespace IcarusDataMiner
 		/// </summary>
 		/// <param name="worldData">The world data for the map the overlay will be used with</param>
 		/// <param name="assetFileProvider">Provider for game assets</param>
-		public static MapOverlayBuilder Create(WorldData worldData, IFileProvider assetFileProvider)
+		/// <param name="scale">Scale to apply to the coordinate space which affects the resulting image size but not the scale of elements within the image</param>
+		public static MapOverlayBuilder Create(WorldData worldData, IFileProvider assetFileProvider, float scale = 1.0f)
 		{
 			float offsetX = worldData.MinimapData!.WorldBoundaryMin.X;
 			float offsetY = worldData.MinimapData!.WorldBoundaryMin.Y;
@@ -59,8 +60,8 @@ namespace IcarusDataMiner
 			float mapWidth = worldData.MinimapData.WorldBoundaryMax.X - offsetX;
 			float mapHeight = worldData.MinimapData.WorldBoundaryMax.Y - offsetY;
 
-			float scaleX = (float)(WorldDataUtil.WorldToMap);
-			float scaleY = (float)(WorldDataUtil.WorldToMap);
+			float scaleX = (float)WorldDataUtil.WorldToMap * scale;
+			float scaleY = (float)WorldDataUtil.WorldToMap * scale;
 
 			float scaleFactor = 0.5f;
 
@@ -75,7 +76,7 @@ namespace IcarusDataMiner
 			int imageWidth = (int)Math.Ceiling(mapWidth * scaleX);
 			int imageHeight = (int)Math.Ceiling(mapHeight * scaleY);
 
-			  return new MapOverlayBuilder(offsetX, offsetY, imageWidth, imageHeight, scaleX, scaleY, scaleFactor);
+			return new MapOverlayBuilder(offsetX, offsetY, imageWidth, imageHeight, scaleX, scaleY, scaleFactor);
 		}
 
 		/// <summary>
