@@ -33,9 +33,5 @@ namespace IcarusDataMiner
 		public DataMinerException(string message, Exception innerException) : base(message, innerException)
 		{
 		}
-
-		protected DataMinerException(SerializationInfo info, StreamingContext context) : base(info, context)
-		{
-		}
 	}
 }

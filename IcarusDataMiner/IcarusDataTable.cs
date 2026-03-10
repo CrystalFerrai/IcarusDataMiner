@@ -406,8 +406,6 @@ namespace IcarusDataMiner
 	/// </summary>
 	internal class IcarusDataTableConverter : JsonConverter
 	{
-		public static JsonSerializerSettings SerializerSettings { get; }
-
 		public override bool CanWrite => false;
 
 		public override bool CanConvert(Type typeToConvert)
