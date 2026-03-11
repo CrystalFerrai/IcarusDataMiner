@@ -34,7 +34,18 @@ namespace IcarusDataMiner.Miners
 	[DefaultEnabled(false)]
 	internal class FoliageMiner : IDataMiner
 	{
+		// Items in this list will be ignored when searching for foliage. Values defined below.
 		private static HashSet<string> sIgnoredItems;
+
+		// The distance at which foliage instances will group together, in world units.
+		// Smaller values create more smaller clusters while larger values create fewer larger clusters.
+		private const float ClusterDistanceThreshold = WorldDataUtil.WorldCellSize * 0.1f;
+
+		// The partition size used by the clustering algorithm, in world units. This value tunes the performance
+		// of the algorithm by influencing the number of distance chacks between foliage instances.
+		// The value must be at least double the value of ClusterDistanceThreshold. Larger values may improve
+		// or worsen perfoamance depending on the distribution of foliage instances.
+		private const float PartitionSize = WorldDataUtil.WorldCellSize * 0.25f;
 
 		public string Name => "Foliage";
 
@@ -534,7 +545,7 @@ namespace IcarusDataMiner.Miners
 
 			public FoliageData(WorldData worldData, FItemableData rewardItem, string displayName)
 			{
-				ClusterBuilder = new(worldData, WorldDataUtil.WorldCellSize * 0.1f, WorldDataUtil.WorldCellSize * 0.25f);
+				ClusterBuilder = new(worldData, ClusterDistanceThreshold, PartitionSize);
 				RewardItem = rewardItem;
 				DisplayName = displayName;
 			}
