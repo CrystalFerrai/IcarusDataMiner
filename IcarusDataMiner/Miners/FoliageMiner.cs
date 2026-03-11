@@ -433,7 +433,7 @@ namespace IcarusDataMiner.Miners
 
 			string outDir = Path.Combine(config.OutputDirectory, Name, "Visual", mapName);
 
-			SKColor areasColor = new(255, 255, 255, 128);
+			SKColor areasColor = new(255, 255, 255, 208);
 
 			foreach (var pair in foliageData)
 			{
