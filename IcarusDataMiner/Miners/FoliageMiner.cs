@@ -40,6 +40,9 @@ namespace IcarusDataMiner.Miners
 
 		static FoliageMiner()
 		{
+			ObjectTypeRegistry.RegisterClass("FLODFISMComponent", typeof(UHierarchicalInstancedStaticMeshComponent));
+			ObjectTypeRegistry.RegisterClass("IcarusFLODFISMComponent", typeof(UHierarchicalInstancedStaticMeshComponent));
+
 			// Using names from D_Itemable
 			sIgnoredItems = new(StringComparer.OrdinalIgnoreCase)
 			{
@@ -414,10 +417,10 @@ namespace IcarusDataMiner.Miners
 				using (FileStream outStream = IOUtil.CreateFile(outPath, logger))
 				using (StreamWriter writer = new StreamWriter(outStream))
 				{
-					writer.WriteLine("map,x,y,count");
+					writer.WriteLine("x,y,radius,count");
 					for (int i = 0; i < pair.Value.Clusters!.Count; ++i)
 					{
-						writer.WriteLine($"{mapName},{pair.Value.Clusters![i].CenterX},{pair.Value.Clusters![i].CenterY},{pair.Value.Clusters![i].Count}");
+						writer.WriteLine($"{pair.Value.Clusters![i].CenterX},{pair.Value.Clusters![i].CenterY},{pair.Value.Clusters![i].MaxX - pair.Value.Clusters![i].MinX},{pair.Value.Clusters![i].Count}");
 					}
 				}
 			}
@@ -430,18 +433,20 @@ namespace IcarusDataMiner.Miners
 
 			string outDir = Path.Combine(config.OutputDirectory, Name, "Visual", mapName);
 
+			SKColor areasColor = new(255, 255, 255, 128);
+
 			foreach (var pair in foliageData)
 			{
 				logger.Debug($"Generating image for {pair.Value.DisplayName}");
 
-				// Create "Dots" map
+				// Create "Areas" map
 				{
-					mapBuilder.AddLocations(pair.Value.Clusters!.Select(c => new MapLocation(new FVector(c.CenterX, c.CenterY, 0.0f), Math.Min((float)Math.Log2(c.Count) + 3.0f, 10.0f) * 0.5f)));
+					mapBuilder.AddLocations(pair.Value.Clusters!.Select(c => new MapLocation(new FVector(c.CenterX, c.CenterY, 0.0f), Math.Max(3.0f, (float)(WorldDataUtil.WorldToMap * (c.MaxX - c.MinX))))), areasColor);
 					SKData outData = mapBuilder.DrawOverlay();
 					mapBuilder.ClearLocations();
 
 					Directory.CreateDirectory(outDir);
-					string outPath = Path.Combine(outDir, "Dots", $"{pair.Value.DisplayName}.png");
+					string outPath = Path.Combine(outDir, "Areas", $"{pair.Value.DisplayName}.png");
 					using (FileStream outStream = IOUtil.CreateFile(outPath, logger))
 					{
 						outData.SaveTo(outStream);
@@ -502,7 +507,7 @@ namespace IcarusDataMiner.Miners
 				}
 			}
 
-			// Output composite map
+			// Output composite icons map
 			{
 				SKData outData = compositeMapBuilder.DrawOverlay();
 				compositeMapBuilder.ClearLocations(true);
