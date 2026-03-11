@@ -18,9 +18,9 @@ using CUE4Parse.UE4.Assets.Exports;
 using CUE4Parse.UE4.Assets.Exports.Component.StaticMesh;
 using CUE4Parse.UE4.Assets.Objects;
 using CUE4Parse.UE4.Objects.Core.Math;
+using CUE4Parse.UE4.Objects.Engine;
 using CUE4Parse.UE4.Objects.UObject;
-using CUE4Parse.UE4.Readers;
-using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using SkiaSharp;
 
 namespace IcarusDataMiner.Miners
@@ -34,153 +34,30 @@ namespace IcarusDataMiner.Miners
 	[DefaultEnabled(false)]
 	internal class FoliageMiner : IDataMiner
 	{
-		// Foliage instances less than this distance apart will be grouped. Distance calculation based on Manhattan distance.
-		// Tweaking this affects how output data is grouped.
-		private const float GroupDistanceThreshold = WorldDataUtil.WorldCellSize * 0.04f; // 25x25 points per cell
-		//private const float GroupDistanceThreshold = WorldDataUtil.WorldCellSize * 0.16f;
-
-		// Size to break world into for collision detection algorithm.
-		// Tweaking this affects running time and and memory usage of this miner.
-		// Must be at least double the value of GroupDistanceThreshold to not break the algorithm.
-		private const float PartitionSize = WorldDataUtil.WorldCellSize * 0.2f;
-		//private const float PartitionSize = WorldDataUtil.WorldCellSize * 0.4f;
-
-		// Maximum size of a cluster point for exported map images
-		private const float MaxPointSize = (float)(GroupDistanceThreshold * WorldDataUtil.WorldToMap);
-
-		private static Dictionary<string, string> sPlantMap;
-		private static Dictionary<string, string> sMiscMap;
+		private static HashSet<string> sIgnoredItems;
 
 		public string Name => "Foliage";
 
 		static FoliageMiner()
 		{
-			ObjectTypeRegistry.RegisterClass("FLODFISMComponent", typeof(UHierarchicalInstancedStaticMeshComponent));
-			ObjectTypeRegistry.RegisterClass("IcarusFLODFISMComponent", typeof(UHierarchicalInstancedStaticMeshComponent));
-
-			// Map of plant types to collect data about.
-			// Refer to Data/FLOD/D_FLODDescriptions.json for all possible types
-			sPlantMap = new Dictionary<string, string>()
+			// Using names from D_Itemable
+			sIgnoredItems = new(StringComparer.OrdinalIgnoreCase)
 			{
-				// Variations with prefixes are intended to be biome-specific
-				// LC = lava cave
-				// SW = swamp
-				// TU = tundra
-
-				{ "FT_Alpine_Lily_01", "Lily" },
-
-				{ "FT_Beans", "Beans" },
-				{ "FT_LC_Beans", "Beans" },
-
-				{ "FT_BerryBush", "Berries" },
-				{ "FT_SW_Blackberry_Bush_01", "Berries" },
-				{ "FT_SW_Blackberry_Bush_02", "Berries" },
-				{ "FT_SW_Blackberry_Bush_03", "Berries" },
-
-				{ "FT_Carrot", "Carrot" },
-
-				{ "FT_Cocoa", "Cocoa" },
-				{ "FT_LC_Cocoa", "Cocoa" },
-
-				{ "FT_Coffee", "Coffee" },
-
-				// There are many instances of this, but not sure what it actually is
-				//{ "FT_ConiferFlower_01", "Flower" },
-
-				// Corn cobs can be found laying on the ground near corn stalks
-				{ "FT_CornCob_01", "Corn" },
-				{ "FT_CropCorn_01", "Corn" },
-
-				{ "FT_GreenTea", "GreenTea" },
-
-				{ "FT_SW_Potato_Wild", "Potato" },
-				{ "FT_TU_Potato_Wild", "Potato" },
-
-				{ "FT_MushroomA", "Mushroom" },
-
-				{ "FT_Pumpkin", "Pumpkin" },
-				{ "FT_TU_Pumpkin", "Pumpkin" },
-
-				{ "FT_ReedFlower_01", "Reed" },
-
-				{ "FT_Sponge_01", "Sponge" },
-
-				{ "FT_Squash", "Squash" },
-				{ "FT_LC_Squash", "Squash" },
-
-				{ "FT_Tomatoes_Wild", "Tomato" },
-
-				{ "FT_Watermelon", "Watermelon" },
-
-				{ "FT_Wheat_03", "Wheat" },
-
-				{ "FT_WildTea", "WildTea" },
-				{ "FT_LC_WildTea", "WildTea" },
-
-				{ "FT_YeastPlant_01", "Yeast" },
-			};
-
-			sMiscMap = new Dictionary<string, string>()
-			{
-				// These entries are just for visualizing specific data that was of interest for one reason or another.
-				// These are not typical harvestable plants like the rest of the list.
-				// These are not included in the composite output images.
-
-				{ "FT_Breakable_Scoria_Var1", "Scoria" },
-				{ "FT_Breakable_Scoria_Var2", "Scoria" },
-				{ "FT_Breakable_Scoria_Var3", "Scoria" },
-				
-				{ "FT_Breakable_Clay_Var1", "Clay" },
-				{ "FT_Breakable_Clay_Var2", "Clay" },
-
-				{ "FT_Breakable_Obsidian_Var1", "Obsidian" },
-				{ "FT_Breakable_Obsidian_Var2", "Obsidian" },
-
-				// Trees and fiber in lava cave biomes
-				{ "FT_LC_Bulbous_Flax_Var1", "LC_Flax" },
-				{ "FT_LC_Bulbous_Flax_Var2", "LC_Flax" },
-				{ "FT_LC_Bulbous_Flax_Var3", "LC_Flax" },
-				{ "FT_LC_Sapling_A_Var1", "LC_Sapling" },
-				{ "FT_LC_Sapling_A_Var2", "LC_Sapling" },
-				{ "FT_LC_Sapling_A_Var3", "LC_Sapling" },
-				{ "FT_LC_Sapling_A_Var4", "LC_Sapling" },
-				{ "FT_LC_JoshuaTree_Var1", "LC_Trees" },
-				{ "FT_LC_JoshuaTree_Var2", "LC_Trees" },
-				{ "FT_LC_JoshuaTree_Var3", "LC_Trees" },
-				{ "FT_LC_SucculentTree_Var1", "LC_Trees" },
-				{ "FT_LC_SucculentTree_Var2", "LC_Trees" },
-				{ "FT_LC_SucculentTree_Var3", "LC_Trees" },
-
-				// Resource pickups
-				{ "FT_GenericTwig", "Pickup_Wood" },
-				{ "FT_GenericTwig2", "Pickup_Wood" },
-
-				{ "FT_AC_Stone_1", "Pickup_Stone" },
-				{ "FT_AC_Stone_2", "Pickup_Stone" },
-				{ "FT_AC_Stone_3", "Pickup_Stone" },
-				{ "FT_AC_Stone_4", "Pickup_Stone" },
-				{ "FT_CF_Stone_01", "Pickup_Stone" },
-				{ "FT_CF_Stone_02", "Pickup_Stone" },
-				{ "FT_CF_Stone_03", "Pickup_Stone" },
-				{ "FT_CF_Stone_04", "Pickup_Stone" },
-				{ "FT_DC_Stone_01", "Pickup_Stone" },
-				{ "FT_DC_Stone_02", "Pickup_Stone" },
-				{ "FT_DC_Stone_03", "Pickup_Stone" },
-				{ "FT_DC_Stone_04", "Pickup_Stone" },
-				{ "FT_LC_Stone_01", "Pickup_Stone" },
-				{ "FT_LC_Stone_02", "Pickup_Stone" },
-				{ "FT_LC_Stone_03", "Pickup_Stone" },
-				{ "FT_LC_Stone_04", "Pickup_Stone" },
-
-				{ "FT_GEN_Oxite_01", "Pickup_Oxite" },
-				{ "FT_GEN_Oxite_02", "Pickup_Oxite" },
-				{ "FT_GEN_Oxite_03", "Pickup_Oxite" }
+				"Item_Ice",
+				"Item_Fiber",
+				"Item_Organic_Resin",
+				"Item_Oxite",
+				"Item_Seed",
+				"Item_Stick",
+				"Item_Stone",
+				"Item_Tree_Sap", 
+				"Item_Wood"
 			};
 		}
 
 		public bool Run(IProviderManager providerManager, Config config, Logger logger)
 		{
-			IReadOnlyDictionary<string, FoliageTypeData> meshMap = LoadFoliageMap(providerManager, logger);
+			IDictionary<string, ISet<FItemableData>> meshItemRewardMap = BuildMeshItemRewardMap(providerManager, logger);
 
 			foreach (WorldData world in providerManager.WorldDataUtil.Rows)
 			{
@@ -191,24 +68,157 @@ namespace IcarusDataMiner.Miners
 				GameFile? packageFile;
 				if (!providerManager.AssetProvider.Files.TryGetValue(packageName, out packageFile))
 				{
-					logger.Log(LogLevel.Information, $"Skipping {packageName} due to missing map assets.");
+					logger.Information($"Skipping {packageName} due to missing map assets.");
 					continue;
 				}
 
 				if (world.MinimapData == null)
 				{
-					logger.Log(LogLevel.Information, $"Skipping {packageName} due to missing map boundary data.");
+					logger.Information($"Skipping {packageName} due to missing map boundary data.");
 					continue;
 				}
 
-				logger.Log(LogLevel.Information, $"Processing {packageFile.NameWithoutExtension}...");
-				ProcessMap(packageFile, providerManager, world, meshMap, config, logger);
+				logger.Information($"Processing {packageFile.NameWithoutExtension}...");
+				ProcessMap(packageFile, providerManager, world, meshItemRewardMap, config, logger);
 			}
 
 			return true;
 		}
 
-		private void ProcessMap(GameFile mapAsset, IProviderManager providerManager, WorldData worldData, IReadOnlyDictionary<string, FoliageTypeData> meshMap, Config config, Logger logger)
+		private IDictionary<string, ISet<FItemableData>> BuildMeshItemRewardMap(IProviderManager providerManager, Logger logger)
+		{
+			IcarusDataTable<FFLODDescription> flodDescriptionTable = DataTables.LoadDataTable<FFLODDescription>(providerManager.DataProvider, "FLOD/D_FLODDescriptions.json");
+
+			Dictionary<string, ISet<FItemableData>> meshItemRewardMap = new(StringComparer.OrdinalIgnoreCase);
+			foreach (var pair in flodDescriptionTable)
+			{
+				string? path = pair.Value.ViewTraceActor.GetAssetPath();
+				if (path is null)
+				{
+					logger.Warning($"FLOD entry {pair.Key} missing view trace actor");
+					continue;
+				}
+
+				if (!providerManager.AssetProvider.Files.TryGetValue(AssetUtil.GetPackageName(path, "uasset"), out GameFile? file))
+				{
+					logger.Warning($"FLOD entry {pair.Key} view trace actor not found at path {path}");
+					continue;
+				}
+
+				Package package = (Package)providerManager.AssetProvider.LoadPackage(file);
+				UBlueprintGeneratedClass? bpClass = (UBlueprintGeneratedClass?)package.ExportMap.FirstOrDefault(e => e.ClassName.Equals("BlueprintGeneratedClass"))?.ExportObject.Value;
+				if (bpClass is null)
+				{
+					logger.Warning($"FLOD entry {pair.Key} view trace actor at path {path} does not contain a BlueprintGeneratedClass");
+					continue;
+				}
+
+				UObject? bpDefaults = bpClass.ClassDefaultObject.ResolvedObject?.Object?.Value;
+				if (bpDefaults is null)
+				{
+					logger.Warning($"FLOD entry {pair.Key} view trace actor at path {path} does not contain a ClassDefaultObject");
+					continue;
+				}
+
+				HashSet<FRowHandle> itemRewards = new();
+
+				foreach (FPropertyTag property in bpDefaults.Properties)
+				{
+					switch (property.Name.Text)
+					{
+						case "ResourceRewardRow":
+							itemRewards.Add(FRowHandle.FromProperty(property, "D_ItemRewards"));
+							break;
+						case "HitableRewardRow":
+							itemRewards.Add(FRowHandle.FromProperty(property, "D_ItemRewards"));
+							break;
+						case "TreePrimitiveTypesToItemRewards":
+							{
+								UScriptMap treeMap = ((MapProperty)property.Tag!).Value;
+								foreach (var treePair in treeMap.Properties)
+								{
+									itemRewards.Add(FRowHandle.FromProperty(treePair.Value!));
+								}
+							}
+							break;
+					}
+				}
+
+				if (!pair.Value.ViewTraceActorItemRewards.IsNone)
+				{
+					itemRewards.Add(pair.Value.ViewTraceActorItemRewards);
+				}
+
+				if (itemRewards.Count == 0)
+				{
+					continue;
+				}
+
+				string? meshName = GetMeshNameFromFoliage(pair.Value.FoliageType.GetAssetPath()!, providerManager, logger);
+				if (meshName is null)
+				{
+					logger.Warning($"FLOD entry {pair.Key} - unable to load foliage mesh asset {pair.Value.FoliageType.GetAssetPath()!}");
+					continue;
+				}
+
+				HashSet<FItemableData> items = new(new IDataTableRowComparer<FItemableData>());
+				foreach (FRowHandle treeItemReward in itemRewards)
+				{
+					AddItemRewards(meshName, treeItemReward, items, providerManager, logger);
+				}
+
+				if (items.Count > 0)
+				{
+					meshItemRewardMap.Add(meshName, items);
+				}
+			}
+
+			return meshItemRewardMap;
+		}
+
+		private static string? GetMeshNameFromFoliage(string foliageAssetPath, IProviderManager providerManager, Logger logger)
+		{
+			if (!providerManager.AssetProvider.Files.TryGetValue(AssetUtil.GetPackageName(foliageAssetPath, "uasset"), out GameFile? file))
+			{
+				logger.Warning($"Unable to load foliage mesh asset {foliageAssetPath}");
+				return null;
+			}
+			Package package = (Package)providerManager.AssetProvider.LoadPackage(file);
+
+			FObjectExport export = package.ExportMap[0];
+			UObject obj = export.ExportObject.Value;
+			FPackageIndex meshIndex = PropertyUtil.GetOrDefault<FPackageIndex>(obj, "Mesh");
+			return meshIndex.Name;
+		}
+
+		private void AddItemRewards(string entryName, FRowHandle itemRewardRowHandle, HashSet<FItemableData> itemNames, IProviderManager providerManager, Logger logger)
+		{
+			if (!itemRewardRowHandle.IsNone)
+			{
+				if (providerManager.DataTables.TryResolveHandle(itemRewardRowHandle, out FItemRewards itemRewards))
+				{
+					foreach (FItemRewardEntry itemRewardEntry in itemRewards.Rewards)
+					{
+						FItemableData itemData = providerManager.DataTables.GetItemableData(itemRewardEntry);
+						if (Equals(itemData, default(FItemableData)))
+						{
+							logger.Warning($"FLOD entry {entryName} has invalid item reward entry {itemRewardEntry.Item.RowName}");
+							continue;
+						}
+						if (!sIgnoredItems.Contains(itemData.Name))
+						{
+							itemNames.Add(itemData);
+						}
+					}
+				}
+				else
+				{
+					logger.Warning($"FLOD entry {entryName} has invalid item rewards {itemRewardRowHandle}");
+				}
+			}
+		}
+
+		private void ProcessMap(GameFile mapAsset, IProviderManager providerManager, WorldData worldData, IDictionary<string, ISet<FItemableData>> meshItemRewardMap, Config config, Logger logger)
 		{
 			Dictionary<string, FoliageData> foliageData = new();
 
@@ -219,8 +229,8 @@ namespace IcarusDataMiner.Miners
 				GameFile? packageFile;
 				if (!providerManager.AssetProvider.Files.TryGetValue(packagePath, out packageFile)) continue;
 
-				logger.Log(LogLevel.Debug, $"Searching {packageFile.NameWithoutExtension}");
-				FindFoliage(packageFile, FVector.ZeroVector, foliageData, meshMap, worldData, providerManager, logger);
+				logger.Debug($"Searching {packageFile.NameWithoutExtension}");
+				FindFoliage(packageFile, FVector.ZeroVector, foliageData, meshItemRewardMap, worldData, providerManager, logger);
 			}
 
 			if (worldData.TileRowCount == 0 || worldData.TileColumnCount == 0) return;
@@ -234,13 +244,13 @@ namespace IcarusDataMiner.Miners
 					GameFile? packageFile;
 					if (!providerManager.AssetProvider.Files.TryGetValue(packagePath, out packageFile)) continue;
 
-					FVector origin = new FVector(
+					FVector origin = new(
 						x * WorldDataUtil.WorldTileSize + worldData.MinimapData!.WorldBoundaryMin.X,
 						-((y + 1) * WorldDataUtil.WorldTileSize + worldData.MinimapData!.WorldBoundaryMin.Y),
 						0.0f);
 
-					logger.Log(LogLevel.Debug, $"Searching {packageFile.NameWithoutExtension}");
-					FindFoliage(packageFile, origin, foliageData, meshMap, worldData, providerManager, logger);
+					logger.Debug($"Searching {packageFile.NameWithoutExtension}");
+					FindFoliage(packageFile, origin, foliageData, meshItemRewardMap, worldData, providerManager, logger);
 				}
 			}
 
@@ -248,7 +258,7 @@ namespace IcarusDataMiner.Miners
 
 			foreach (FoliageData foliage in foliageData.Values)
 			{
-				foliage.BuildClusters();
+				foliage.ClusterBuilder.BuildClusters();
 			}
 
 			ExportData(mapAsset.NameWithoutExtension, foliageData, config, logger);
@@ -256,330 +266,7 @@ namespace IcarusDataMiner.Miners
 			ExportImages(mapAsset.NameWithoutExtension, providerManager, worldData, foliageData, config, logger);
 		}
 
-		private void ExportData(string mapName, Dictionary<string, FoliageData> foliageData, Config config, Logger logger)
-		{
-			// The first output is for code parsing and DB importing for IcarusIntel
-			string outPath = Path.Combine(config.OutputDirectory, Name, "Data", $"{mapName}.csv");
-
-			using (FileStream outStream = IOUtil.CreateFile(outPath, logger))
-			using (StreamWriter writer = new StreamWriter(outStream))
-			{
-				writer.WriteLine("map,x,y,variety,count");
-
-				foreach (var pair in foliageData)
-				{
-					for (int i = 0; i < pair.Value.Clusters!.Count; ++i)
-					{
-						writer.WriteLine($"{mapName},{pair.Value.Clusters![i].CenterX},{pair.Value.Clusters![i].CenterY},{pair.Key},{pair.Value.Clusters![i].Count}");
-					}
-				}
-			}
-
-			// The second output is meant to be human readable
-			outPath = Path.Combine(config.OutputDirectory, Name, "Data", $"{mapName}_Readable.csv");
-
-			using (FileStream outStream = IOUtil.CreateFile(outPath, logger))
-			using (StreamWriter writer = new StreamWriter(outStream))
-			{
-				int j = 0;
-				foreach (string ft in foliageData.Keys)
-				{
-					writer.Write($"{ft}.X,{ft}.Y,{ft}.Count");
-					++j;
-					if (j < foliageData.Count) writer.Write(",");
-				}
-				writer.WriteLine();
-
-				int most = foliageData.Values.Max(v => v.Clusters!.Count);
-
-				for (int i = 0; i < most; ++i)
-				{
-					j = 0;
-					foreach (var pair in foliageData)
-					{
-						if (i < pair.Value.Clusters!.Count)
-						{
-							writer.Write($"{pair.Value.Clusters![i].CenterX},{pair.Value.Clusters![i].CenterY},{pair.Value.Clusters![i].Count}");
-						}
-						else
-						{
-							writer.Write(",,");
-						}
-						++j;
-						if (j < foliageData.Count) writer.Write(",");
-					}
-					writer.WriteLine();
-				}
-			}
-		}
-
-		private void ExportImages(string mapName, IProviderManager providerManager, WorldData worldData, IReadOnlyDictionary<string, FoliageData> foliageData, Config config, Logger logger)
-		{
-			MapOverlayBuilder mapBuilder = MapOverlayBuilder.Create(worldData, providerManager.AssetProvider);
-			MapOverlayBuilder compositeMapBuilder = MapOverlayBuilder.Create(worldData, providerManager.AssetProvider);
-			foreach (var pair in foliageData)
-			{
-				logger.Log(LogLevel.Debug, $"Generating image for {pair.Key}");
-
-				// Create "Dots" map
-				{
-					mapBuilder.AddLocations(pair.Value.Clusters!.Select(c => new MapLocation(new FVector(c.CenterX, c.CenterY, 0.0f), Math.Min((float)Math.Log2(c.Count) + 3.0f, 10.0f) * 0.5f)));
-					SKData outData = mapBuilder.DrawOverlay();
-					mapBuilder.ClearLocations();
-
-					string outDir = Path.Combine(config.OutputDirectory, Name, "Visual", mapName);
-					Directory.CreateDirectory(outDir);
-					string outPath = Path.Combine(outDir, "Dots", $"{mapName}_{pair.Key}.png");
-					using (FileStream outStream = IOUtil.CreateFile(outPath, logger))
-					{
-						outData.SaveTo(outStream);
-					}
-				}
-
-				// Create "Icons" map
-				using SKBitmap? bitmap = pair.Value.IconPath is null ? null : AssetUtil.LoadAndDecodeTexture(pair.Key, pair.Value.IconPath, providerManager.AssetProvider, logger);
-				if (bitmap is not null)
-				{
-					const int size = 32;
-
-					SKImageInfo surfaceInfo = new()
-					{
-						Width = size,
-						Height = size,
-						ColorSpace = SKColorSpace.CreateSrgb(),
-						ColorType = SKColorType.Rgba8888,
-						AlphaType = SKAlphaType.Premul
-					};
-
-					using SKBitmap scaled = new(surfaceInfo);
-					bitmap.ScalePixels(scaled, SKFilterQuality.High);
-
-					using SKPaint paint = new()
-					{
-						ImageFilter = SKImageFilter.CreateDropShadow(0.0f, 0.0f, 2.0f, 2.0f, SKColors.White)
-					};
-
-					SKImage icon;
-					using (SKSurface surface = SKSurface.Create(surfaceInfo))
-					{
-						SKCanvas canvas = surface.Canvas;
-
-						canvas.DrawBitmap(scaled, 0.0f, 0.0f, paint);
-
-						surface.Flush();
-						icon = surface.Snapshot();
-					}
-
-					IEnumerable<MapLocation> locations = pair.Value.Clusters!.Select(c => new MapLocation(new FVector(c.CenterX, c.CenterY, 0.0f)));
-					{
-						mapBuilder.AddLocations(locations, icon);
-						SKData outData = mapBuilder.DrawOverlay();
-						mapBuilder.ClearLocations();
-
-						string outDir = Path.Combine(config.OutputDirectory, Name, "Visual", mapName);
-						Directory.CreateDirectory(outDir);
-						string outPath = Path.Combine(outDir, "Icons", $"{mapName}_{pair.Key}.png");
-						using (FileStream outStream = IOUtil.CreateFile(outPath, logger))
-						{
-							outData.SaveTo(outStream);
-						}
-					}
-
-					// Also add to composite map
-					compositeMapBuilder.AddLocations(locations, icon);
-				}
-			}
-
-			// Output composite map
-			{
-				SKData outData = compositeMapBuilder.DrawOverlay();
-				compositeMapBuilder.ClearLocations(true);
-
-				string outDir = Path.Combine(config.OutputDirectory, Name, "Visual");
-				Directory.CreateDirectory(outDir);
-				string outPath = Path.Combine(outDir, mapName, $"{mapName}.png");
-				using (FileStream outStream = IOUtil.CreateFile(outPath, logger))
-				{
-					outData.SaveTo(outStream);
-				}
-			}
-		}
-
-		private static IReadOnlyDictionary<string, FoliageTypeData> LoadFoliageMap(IProviderManager providerManager, Logger logger)
-		{
-			Dictionary<string, FoliageTypeData> foliageMap = new();
-
-			GameFile file = providerManager.DataProvider.Files["FLOD/D_FLODDescriptions.json"];
-
-			using (FArchive archive = file.CreateReader())
-			using (StreamReader stream = new StreamReader(archive))
-			using (JsonReader reader = new JsonTextReader(stream))
-			{
-				string? foliageType = null, meshPath = null, blueprintPath = null;
-
-				FlodParseState state = FlodParseState.SearchingForRows;
-				int objectDepth = 0;
-
-				while (state != FlodParseState.Done && reader.Read())
-				{
-					switch (state)
-					{
-						case FlodParseState.SearchingForRows:
-							if (reader.TokenType != JsonToken.PropertyName) break;
-
-							if (!reader.Value!.Equals("Rows"))
-							{
-								reader.Skip();
-								break;
-							}
-
-							reader.Read();
-							state = FlodParseState.InRows;
-							break;
-						case FlodParseState.InRows:
-							if (reader.TokenType == JsonToken.EndArray)
-							{
-								state = FlodParseState.Done;
-							}
-							else if (reader.TokenType == JsonToken.StartObject)
-							{
-								state = FlodParseState.InObject;
-								objectDepth = reader.Depth + 1;
-							}
-							break;
-						case FlodParseState.InObject:
-							if (reader.TokenType == JsonToken.PropertyName)
-							{
-								if (reader.Value!.Equals("Name"))
-								{
-									foliageType = reader.ReadAsString();
-								}
-								else if (reader.Value!.Equals("FoliageType"))
-								{
-									meshPath = reader.ReadAsString()!;
-								}
-								else if (reader.Value!.Equals("ViewTraceActor"))
-								{
-									blueprintPath = reader.ReadAsString()!;
-								}
-								else
-								{
-									reader.Skip();
-								}
-							}
-							if (reader.Depth < objectDepth)
-							{
-								if (foliageType != null && meshPath != null && blueprintPath != null)
-								{
-									string? plantName;
-									bool includeInComposite = true;
-									if (!sPlantMap.TryGetValue(foliageType, out plantName))
-									{
-										includeInComposite = false;
-										sMiscMap.TryGetValue(foliageType, out plantName);
-									}
-									if (plantName is not null)
-									{
-										string meshName = GetMeshNameFromFoliage(meshPath, providerManager, logger);
-										FoliageTypeData foliageData = new()
-										{
-											PlantName = plantName,
-											IconPath = includeInComposite ? GetIconPathFromFoliage(blueprintPath, providerManager, logger) : null
-										};
-										foliageMap.Add(meshName, foliageData);
-									}
-									foliageType = null;
-									meshPath = null;
-									blueprintPath = null;
-								}
-								state = FlodParseState.InRows;
-							}
-							break;
-						case FlodParseState.ExitObject:
-							if (reader.Depth < objectDepth)
-							{
-								state = FlodParseState.InRows;
-							}
-							else
-							{
-								reader.Skip();
-							}
-							break;
-					}
-				}
-			}
-
-			return foliageMap;
-		}
-
-		private enum FlodParseState
-		{
-			SearchingForRows,
-			InRows,
-			InObject,
-			ExitObject,
-			Done
-		}
-
-		private static string GetMeshNameFromFoliage(string foliageAssetPath, IProviderManager providerManager, Logger logger)
-		{
-			GameFile asset = providerManager.AssetProvider.Files[AssetUtil.GetPackageName(foliageAssetPath, "uasset")];
-			Package package = (Package)providerManager.AssetProvider.LoadPackage(asset);
-
-			FObjectExport export = package.ExportMap[0];
-			UObject obj = export.ExportObject.Value;
-			FPackageIndex meshIndex = PropertyUtil.GetOrDefault<FPackageIndex>(obj, "Mesh");
-			return meshIndex.Name;
-		}
-
-		private static string? GetIconPathFromFoliage(string foliageAssetPath, IProviderManager providerManager, Logger logger)
-		{
-			GameFile asset = providerManager.AssetProvider.Files[AssetUtil.GetPackageName(foliageAssetPath, "uasset")];
-			Package package = (Package)providerManager.AssetProvider.LoadPackage(asset);
-
-			string className = foliageAssetPath[(foliageAssetPath.LastIndexOf('.') + 1)..];
-
-			FObjectExport? export = package.ExportMap.FirstOrDefault(oe => oe.ClassName.Equals(className));
-			if (export is null)
-			{
-				logger.Log(LogLevel.Warning, $"Could not locate class defaults for {className}. No icon will be associated with this foliage.");
-				return null;
-			}
-
-			string? rewardRowName = null;
-			try
-			{
-				UObject obj = export.ExportObject.Value;
-				FStructFallback? resourceRewardProperty = PropertyUtil.GetOrDefault<FStructFallback>(obj, "ResourceRewardRow");
-				if (resourceRewardProperty is null)
-				{
-					FStructFallback? breakableRockDataProperty = PropertyUtil.GetOrDefault<FStructFallback>(obj, "BreakableRockData");
-					if (breakableRockDataProperty is not null)
-					{
-						string breakableRockRowName = PropertyUtil.Get<FName>(breakableRockDataProperty, "RowName").Text;
-						rewardRowName = providerManager.DataTables.BreakableRockTable![breakableRockRowName].ItemReward.RowName;
-					}
-				}
-				else
-				{
-					rewardRowName = PropertyUtil.Get<FName>(resourceRewardProperty, "RowName").Text;
-				}
-			}
-			catch
-			{
-			}
-			if (rewardRowName is null)
-			{
-				logger.Log(LogLevel.Warning, $"Could not locate reward row value for {className}. No icon will be associated with this foliage.");
-				return null;
-			}
-
-			FItemRewards rewardsData = providerManager.DataTables.ItemRewardsTable![rewardRowName];
-			FItemableData itemdata = providerManager.DataTables.GetItemableData(rewardsData.Rewards[0]);
-			return itemdata.Icon.GetAssetPath();
-		}
-
-		private static void FindFoliage(GameFile mapAsset, FVector origin, IDictionary<string, FoliageData> foliageData, IReadOnlyDictionary<string, FoliageTypeData> meshMap, WorldData worldData, IProviderManager providerManager, Logger logger)
+		private static void FindFoliage(GameFile mapAsset, FVector origin, IDictionary<string, FoliageData> foliageData, IDictionary<string, ISet<FItemableData>> flodItemRewardMap, WorldData worldData, IProviderManager providerManager, Logger logger)
 		{
 			Package mapPackage = (Package)providerManager.AssetProvider.LoadPackage(mapAsset);
 
@@ -693,215 +380,218 @@ namespace IcarusDataMiner.Miners
 				}
 				if (meshName == null) continue;
 
-				FoliageTypeData foliageType;
-				if (!meshMap.TryGetValue(meshName, out foliageType)) continue;
-				if (foliageType.PlantName is null) continue;
-
-				FoliageData? foliage;
-				if (!foliageData.TryGetValue(foliageType.PlantName, out foliage))
+				ISet<FItemableData>? itemRewards;
+				if (!flodItemRewardMap.TryGetValue(meshName, out itemRewards))
 				{
-					foliage = new FoliageData(worldData.MinimapData!, foliageType.IconPath);
-					foliageData.Add(foliageType.PlantName, foliage);
+					continue;
 				}
 
-				foreach (FInstancedStaticMeshInstanceData instanceData in fismObject.PerInstanceSMData)
+				foreach (FItemableData itemReward in itemRewards)
 				{
-					foliage.AddInstance(origin + parentTransform.TransformPosition(instanceData.TransformData.Translation));
+					FoliageData? foliage;
+					if (!foliageData.TryGetValue(itemReward.Name, out foliage))
+					{
+						foliage = new(worldData, itemReward, LocalizationUtil.GetLocalizedString(providerManager.AssetProvider, itemReward.DisplayName));
+						foliageData.Add(itemReward.Name, foliage);
+					}
+
+					foreach (FInstancedStaticMeshInstanceData instanceData in fismObject.PerInstanceSMData)
+					{
+						foliage.ClusterBuilder.AddLocation(origin + parentTransform.TransformPosition(instanceData.TransformData.Translation));
+					}
+				}
+			}
+		}
+
+		private void ExportData(string mapName, Dictionary<string, FoliageData> foliageData, Config config, Logger logger)
+		{
+			string outDir = Path.Combine(config.OutputDirectory, Name, "Data", mapName);
+
+			foreach (var pair in foliageData)
+			{
+				string outPath = Path.Combine(config.OutputDirectory, outDir, $"{pair.Value.DisplayName}.csv");
+
+				using (FileStream outStream = IOUtil.CreateFile(outPath, logger))
+				using (StreamWriter writer = new StreamWriter(outStream))
+				{
+					writer.WriteLine("map,x,y,count");
+					for (int i = 0; i < pair.Value.Clusters!.Count; ++i)
+					{
+						writer.WriteLine($"{mapName},{pair.Value.Clusters![i].CenterX},{pair.Value.Clusters![i].CenterY},{pair.Value.Clusters![i].Count}");
+					}
+				}
+			}
+		}
+
+		private void ExportImages(string mapName, IProviderManager providerManager, WorldData worldData, IReadOnlyDictionary<string, FoliageData> foliageData, Config config, Logger logger)
+		{
+			MapOverlayBuilder mapBuilder = MapOverlayBuilder.Create(worldData, providerManager.AssetProvider);
+			MapOverlayBuilder compositeMapBuilder = MapOverlayBuilder.Create(worldData, providerManager.AssetProvider);
+
+			string outDir = Path.Combine(config.OutputDirectory, Name, "Visual", mapName);
+
+			foreach (var pair in foliageData)
+			{
+				logger.Debug($"Generating image for {pair.Value.DisplayName}");
+
+				// Create "Dots" map
+				{
+					mapBuilder.AddLocations(pair.Value.Clusters!.Select(c => new MapLocation(new FVector(c.CenterX, c.CenterY, 0.0f), Math.Min((float)Math.Log2(c.Count) + 3.0f, 10.0f) * 0.5f)));
+					SKData outData = mapBuilder.DrawOverlay();
+					mapBuilder.ClearLocations();
+
+					Directory.CreateDirectory(outDir);
+					string outPath = Path.Combine(outDir, "Dots", $"{pair.Value.DisplayName}.png");
+					using (FileStream outStream = IOUtil.CreateFile(outPath, logger))
+					{
+						outData.SaveTo(outStream);
+					}
+				}
+
+				// Create "Icons" map
+				string? iconPath = pair.Value.RewardItem.Icon.GetAssetPath();
+				using SKBitmap? bitmap = iconPath is null ? null : AssetUtil.LoadAndDecodeTexture(pair.Key, iconPath, providerManager.AssetProvider, logger);
+				if (bitmap is not null)
+				{
+					const int size = 32;
+
+					SKImageInfo surfaceInfo = new()
+					{
+						Width = size,
+						Height = size,
+						ColorSpace = SKColorSpace.CreateSrgb(),
+						ColorType = SKColorType.Rgba8888,
+						AlphaType = SKAlphaType.Premul
+					};
+
+					using SKBitmap scaled = new(surfaceInfo);
+					bitmap.ScalePixels(scaled, SKFilterQuality.High);
+
+					using SKPaint paint = new()
+					{
+						ImageFilter = SKImageFilter.CreateDropShadow(0.0f, 0.0f, 2.0f, 2.0f, SKColors.White)
+					};
+
+					SKImage icon;
+					using (SKSurface surface = SKSurface.Create(surfaceInfo))
+					{
+						SKCanvas canvas = surface.Canvas;
+
+						canvas.DrawBitmap(scaled, 0.0f, 0.0f, paint);
+
+						surface.Flush();
+						icon = surface.Snapshot();
+					}
+
+					IEnumerable<MapLocation> locations = pair.Value.Clusters!.Select(c => new MapLocation(new FVector(c.CenterX, c.CenterY, 0.0f)));
+					{
+						mapBuilder.AddLocations(locations, icon);
+						SKData outData = mapBuilder.DrawOverlay();
+						mapBuilder.ClearLocations();
+
+						Directory.CreateDirectory(outDir);
+						string outPath = Path.Combine(outDir, "Icons", $"{pair.Value.DisplayName}.png");
+						using (FileStream outStream = IOUtil.CreateFile(outPath, logger))
+						{
+							outData.SaveTo(outStream);
+						}
+					}
+
+					// Also add to composite map
+					compositeMapBuilder.AddLocations(locations, icon);
+				}
+			}
+
+			// Output composite map
+			{
+				SKData outData = compositeMapBuilder.DrawOverlay();
+				compositeMapBuilder.ClearLocations(true);
+
+				string compOutDir = Path.Combine(config.OutputDirectory, Name, "Visual");
+				Directory.CreateDirectory(compOutDir);
+				string outPath = Path.Combine(compOutDir, mapName, $"{mapName}.png");
+				using (FileStream outStream = IOUtil.CreateFile(outPath, logger))
+				{
+					outData.SaveTo(outStream);
 				}
 			}
 		}
 
 		private class FoliageData
 		{
-			private FVector2D mWorldBoundaryMin;
-			private FVector2D mWorldBoundaryMax;
+			public ClusterBuilder ClusterBuilder { get; }
 
-			private int mCellCountX;
-			private int mCellCountY;
+			public FItemableData RewardItem { get; }
 
-			private readonly List<Cluster>[,] mCells;
+			public string DisplayName { get; }
 
-			public IReadOnlyList<Cluster>? Clusters { get; private set; }
+			public IReadOnlyList<Cluster>? Clusters => ClusterBuilder.Clusters;
 
-			public string? IconPath { get; }
-
-			public FoliageData(MinimapData mapData, string? iconPath)
+			public FoliageData(WorldData worldData, FItemableData rewardItem, string displayName)
 			{
-				mWorldBoundaryMin = mapData.WorldBoundaryMin;
-				mWorldBoundaryMax = mapData.WorldBoundaryMax;
-
-				float worldSizeX = mWorldBoundaryMax.X - mWorldBoundaryMin.X;
-				float worldSizeY = mWorldBoundaryMax.Y - mWorldBoundaryMin.Y;
-
-				mCellCountX = (int)Math.Ceiling(worldSizeX / PartitionSize);
-				mCellCountY = (int)Math.Ceiling(worldSizeY / PartitionSize);
-
-				mCells = new List<Cluster>[mCellCountX, mCellCountY];
-				
-				for (int y = 0; y < mCellCountY; ++y)
-				{
-					for (int x = 0; x < mCellCountX; ++x)
-					{
-						mCells[x, y] = new List<Cluster>();
-					}
-				}
-
-				IconPath = iconPath;
-			}
-
-			public bool AddInstance(FVector location)
-			{
-				int x = (int)Math.Floor((location.X - mWorldBoundaryMin.X) / PartitionSize);
-				int y = (int)Math.Floor((location.Y - mWorldBoundaryMin.Y) / PartitionSize);
-
-				if (x < 0 || x >= mCells.GetLength(0) ||
-					y < 0 || y >= mCells.GetLength(1))
-				{
-					return false; // Discard if outside the map bounds
-				}
-
-				List<Cluster> clusters = mCells[x, y];
-
-				bool added = false;
-				for (int i = 0; i < clusters.Count; ++i)
-				{
-					Cluster cluster = clusters[i];
-					if (cluster.AddLocation(location))
-					{
-						clusters[i] = cluster;
-						added = true;
-						break;
-					}
-				}
-				if (!added)
-				{
-					clusters.Add(new Cluster(location));
-				}
-
-				return true;
-			}
-
-			public void BuildClusters()
-			{
-				for (int y = 0; y < mCellCountY - 1; ++y)
-				{
-					for (int x = 0; x < mCellCountX - 1; ++x)
-					{
-						List<Cluster> targets = mCells[x, y];
-						for (int y2 = 0; y2 <= 1; ++y2)
-						{
-							for (int x2 = 0; x2 <= 1; ++x2)
-							{
-								if (x2 == 0 && y2 == 0) continue;
-
-								List<Cluster> sources = mCells[x + x2, y + y2];
-								
-								for (int t = 0; t < targets.Count; ++t)
-								{
-									Cluster target = targets[t];
-									for (int s = 0; s < sources.Count; ++s)
-									{
-										if (target.CombineWith(sources[s]))
-										{
-											targets[t] = target;
-											sources.RemoveAt(s--);
-										}
-									}
-								}
-							}
-						}
-					}
-				}
-
-				List<Cluster> clusters = new();
-				for (int y = 0; y < mCellCountY; ++y)
-				{
-					for (int x = 0; x < mCellCountX; ++x)
-					{
-						clusters.AddRange(mCells[x, y]);
-					}
-				}
-				Clusters = clusters;
+				ClusterBuilder = new(worldData, WorldDataUtil.WorldCellSize * 0.1f, WorldDataUtil.WorldCellSize * 0.25f);
+				RewardItem = rewardItem;
+				DisplayName = displayName;
 			}
 
 			public override string ToString()
 			{
-				var cast = mCells.Cast<List<Cluster>>();
-				return $"{cast.Count(v => v.Count > 0)} cells | {cast.Sum(v => v.Count)} instances";
-			}
-		}
-
-		private struct FoliageTypeData
-		{
-			public string? PlantName;
-			public string? IconPath;
-		}
-
-		private struct Cluster
-		{
-			public float MinX;
-			public float MaxX;
-			public float MinY;
-			public float MaxY;
-
-			public int Count;
-
-			public float CenterX => (MinX + MaxX) * 0.5f;
-			public float CenterY => (MinY + MaxY) * 0.5f;
-
-			public Cluster(FVector initialLocation)
-			{
-				MinX = MaxX = initialLocation.X;
-				MinY = MaxY = initialLocation.Y;
-				Count = 1;
-			}
-
-			public bool AddLocation(FVector location)
-			{
-				if (location.X < MinX + GroupDistanceThreshold &&
-					location.X > MaxX - GroupDistanceThreshold &&
-					location.Y < MinY + GroupDistanceThreshold &&
-					location.Y > MaxY - GroupDistanceThreshold)
-				{
-					if (location.X < MinX) MinX = location.X;
-					else if (location.X > MaxX) MaxX = location.X;
-
-					if (location.Y < MinY) MinY = location.Y;
-					else if (location.Y > MaxY) MaxY = location.Y;
-
-					++Count;
-
-					return true;
-				}
-
-				return false;
-			}
-
-			public bool CombineWith(Cluster other)
-			{
-				if (Math.Abs(MaxX - other.MinX) < GroupDistanceThreshold &&
-					Math.Abs(MinX - other.MaxX) < GroupDistanceThreshold &&
-					Math.Abs(MaxY - other.MinY) < GroupDistanceThreshold &&
-					Math.Abs(MinY - other.MaxY) < GroupDistanceThreshold)
-				{
-					if (other.MinX < MinX) MinX = other.MinX;
-					else if (other.MaxX > MaxX) MaxX = other.MaxX;
-
-					if (other.MinY < MinY) MinY = other.MinY;
-					else if (other.MaxY > MaxY) MaxY = other.MaxY;
-
-					Count += other.Count;
-
-					return true;
-				}
-
-				return false;
-			}
-
-			public override string ToString()
-			{
-				return $"({CenterX},{CenterY}) Count={Count}";
+				return DisplayName;
 			}
 		}
 	}
+
+#pragma warning disable CS0649 // Field never assigned to
+
+	internal struct FFLODDescription : IDataTableRow
+	{
+		public string Name { get; set; }
+		public JObject? Metadata { get; set; }
+
+		public ObjectPointer FoliageType;
+		public FGameplayTagContainer FoliageTags;
+		public bool bDisabled;
+		public bool bUseViewTraceInfluence;
+		public ObjectPointer ViewTraceActor;
+		public FRowHandle ViewTraceActorItemTemplate;
+		public FRowHandle ViewTraceActorItemable;
+		public FRowHandle ViewTraceActorItemRewards;
+		public bool bViewTraceClientPredictive;
+		public bool bUseDistanceInfluence;
+		public List<FFLODDistanceLevelDescription> DistanceLevels;
+		public bool bIsFlammable;
+		public FRowHandle Flammable;
+		public FRowHandle BurntFLODEntry;
+		public int RecordIndex;
+		public List<FFLODLevelDescription> Levels;
+	}
+
+	internal struct FFLODDistanceLevelDescription
+	{
+		public ObjectPointer Actor;
+		public float InfluenceDistance;
+		public FRowHandle ActorItemTemplate;
+		public FRowHandle ActorItemRewards;
+	}
+
+	internal struct FFLODLevelDescription
+	{
+		public int LevelIndex;
+		public EFLODLevelInfluenceType InfluenceType;
+		public bool bClientPredictive;
+		public float InfluenceDistance;
+		public int ActorPoolBufferSize;
+		public ObjectPointer ActorReplacementClass;
+		public FRowHandle ItemTemplate;
+		public FRowHandle ItemRewards;
+	}
+
+	internal enum EFLODLevelInfluenceType
+	{
+		None,
+		ViewTrace,
+		Distance
+	}
+
+#pragma warning restore CS0649
 }

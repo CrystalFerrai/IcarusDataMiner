@@ -168,13 +168,22 @@ namespace IcarusDataMiner
 		public string DataTableName;
 
 		[JsonIgnore]
+		public static FRowHandle None;
+
+		[JsonIgnore]
 		public static FRowHandle Invalid;
 
 		[JsonIgnore]
-		public readonly bool IsNone => DataTableName.Equals("None") || RowName.Equals("None");
+		public readonly bool IsNone => RowName.Equals("None");
 
 		static FRowHandle()
 		{
+			None = new()
+			{
+				RowName = "None",
+				DataTableName = "None"
+			};
+
 			Invalid = new()
 			{
 				RowName = "Invalid",
@@ -184,12 +193,17 @@ namespace IcarusDataMiner
 
 		public static FRowHandle FromProperty(FPropertyTag property, string? defaultDataTableName = null)
 		{
+			return FromProperty(property.Tag!, defaultDataTableName);
+		}
+
+		public static FRowHandle FromProperty(FPropertyTagType property, string? defaultDataTableName = null)
+		{
 			FRowHandle handle = new()
 			{
 				DataTableName = defaultDataTableName ?? "None"
 			};
 
-			UScriptStruct obj = (UScriptStruct)property.Tag!.GetValue(typeof(UScriptStruct))!;
+			UScriptStruct obj = (UScriptStruct)property.GetValue(typeof(UScriptStruct))!;
 			FStructFallback strct = (FStructFallback)obj.StructType;
 			foreach (var prop in strct.Properties)
 			{
@@ -276,6 +290,21 @@ namespace IcarusDataMiner
 
 		[JsonIgnore]
 		public JObject? Metadata { get; set; }
+	}
+
+	internal class IDataTableRowComparer<T> : IEqualityComparer<T> where T : IDataTableRow
+	{
+		public int GetHashCode(T obj)
+		{
+			return obj.Name.GetHashCode();
+		}
+
+		public bool Equals(T? x, T? y)
+		{
+			if (x is null) return y is null;
+			if (y is null) return false;
+			return x.Name.Equals(y.Name);
+		}
 	}
 
 	internal static class IDataTableRowExtensions
