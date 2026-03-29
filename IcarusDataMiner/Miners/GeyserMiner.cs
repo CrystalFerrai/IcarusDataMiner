@@ -30,14 +30,12 @@ namespace IcarusDataMiner.Miners
 	{
 		// To extract a geyser ID from a geyser name
 		private static readonly Regex sGeyserIdRegex;
-		private static readonly Regex sOilIdRegex;
 
 		public string Name => "Geysers";
 
 		static GeyserMiner()
 		{
 			sGeyserIdRegex = new Regex(@"BP_EnzymeGeyser(\d*)");
-			sOilIdRegex = new Regex(@"BP_OilGeyser(\d*)");
 		}
 
 		public bool Run(IProviderManager providerManager, Config config, Logger logger)
@@ -141,10 +139,6 @@ namespace IcarusDataMiner.Miners
 				UObject geyserObject = export.ExportObject.Value;
 
 				Match match = sGeyserIdRegex.Match(geyserObject.Name);
-				if (!match.Success)
-				{
-					match = sOilIdRegex.Match(geyserObject.Name);
-				}
 				if (!match.Success)
 				{
 					logger.Log(LogLevel.Warning, $"Error parsing geyser name {geyserObject.Name} in {mapAsset.NameWithoutExtension}. Geyser will be skipped");
