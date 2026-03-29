@@ -28,14 +28,16 @@ namespace IcarusDataMiner.Miners
 	internal class HordeMiner : IDataMiner
 	{
 		// Notes
-		// BP_EnzymeGeyser is the geyser actor. Its base class, EnzymeGeyser, is in c++ where presumably the completion count is stored.
+		// BP_EnzymeGeyser is the geyser actor. Its base class, AEnzymeGeyser, stores the authoratative completion count.
 		// BP_Vapour_Condenser is the condenser actor which attaches to a geyser. It tracks completions and handles giving out rewards.
 		// BPQC_HordeMode is a component attached to a condenser which manages hordes.
 		// BP_HordeSpawner is an actor spawned by BPQC_HordeMode to manage spawning horde creatures.
 
 		// For the sake of performance, Json reading functions in this class use a forward-only stream reader rather than
 		// fully loading the Json and using random access.
+		// PS: This approach is difficult to maintain and may change in the future. The performance difference is not that important.
 
+		// The number of completions to calculate and export in the waves tables
 		private const int NumCreatureCompletions = 10;
 
 		// The number of completions to calculate and export in the rewards tables
@@ -168,8 +170,8 @@ namespace IcarusDataMiner.Miners
 				}
 			}
 
-			IReadOnlyDictionary<string, RewardData> rewardData = GetRewardData(rewardRows, providerManager, logger);
-			ResolveItemNames(rewardData.Values, providerManager, logger);
+			IReadOnlyDictionary<string, IReadOnlyList<RewardData>> rewardData = GetRewardData(rewardRows, providerManager, logger);
+			ResolveItemNames(rewardData.Values.SelectMany(i => i), providerManager, logger);
 
 			foreach (HordeData horde in hordes)
 			{
@@ -322,21 +324,22 @@ namespace IcarusDataMiner.Miners
 			Done
 		}
 
-		private IReadOnlyDictionary<string, RewardData> GetRewardData(IReadOnlySet<string> rows, IProviderManager providerManager, Logger logger)
+		private IReadOnlyDictionary<string, IReadOnlyList<RewardData>> GetRewardData(IReadOnlySet<string> rows, IProviderManager providerManager, Logger logger)
 		{
 			GameFile file = providerManager.DataProvider.Files["Items/D_ItemRewards.json"];
 
-			Dictionary<string, RewardData> rewardData = new Dictionary<string, RewardData>();
+			Dictionary<string, IReadOnlyList<RewardData>> rewardData = new();
 
 			using (FArchive archive = file.CreateReader())
 			using (StreamReader stream = new StreamReader(archive))
 			using (JsonReader reader = new JsonTextReader(stream))
 			{
+				List<RewardData>? currentRewardList = null;
 				RewardData? currentReward = null;
 				int currentRewardMin = 0, currentRewardMax = 0;
 
 				RewardParseState state = RewardParseState.SearchingForRows;
-				int objectDepth = 0, rewardDepth = 0;
+				int objectDepth = 0, rewardsDepth = 0, rewardDepth = 0;
 
 				while (state != RewardParseState.Done && reader.Read())
 				{
@@ -374,8 +377,8 @@ namespace IcarusDataMiner.Miners
 
 									if (rows.Contains(name))
 									{
-										currentReward = new RewardData();
-										rewardData.Add(name, currentReward);
+										currentRewardList = new();
+										rewardData.Add(name, currentRewardList);
 									}
 									else
 									{
@@ -383,10 +386,10 @@ namespace IcarusDataMiner.Miners
 										reader.Skip();
 									}
 								}
-								else if (currentReward != null && reader.Value!.Equals("Rewards"))
+								else if (currentRewardList != null && reader.Value!.Equals("Rewards"))
 								{
 									state = RewardParseState.InRewards;
-									rewardDepth = reader.Depth + 1;
+									rewardsDepth = reader.Depth + 1;
 									reader.Read();
 								}
 								else
@@ -398,10 +401,25 @@ namespace IcarusDataMiner.Miners
 							if (reader.Depth < objectDepth)
 							{
 								state = RewardParseState.InRows;
-								currentReward = null;
+								currentRewardList = null;
 							}
 							break;
 						case RewardParseState.InRewards:
+							if (reader.TokenType == JsonToken.StartObject)
+							{
+								state = RewardParseState.InReward;
+								rewardDepth = reader.Depth + 1;
+
+								currentReward = new();
+								currentRewardList!.Add(currentReward);
+							}
+							if (reader.Depth < rewardsDepth)
+							{
+								state = RewardParseState.InObject;
+								currentReward = null;
+							}
+							break;
+						case RewardParseState.InReward:
 							if (reader.TokenType == JsonToken.PropertyName)
 							{
 								switch (reader.Value!)
@@ -422,7 +440,7 @@ namespace IcarusDataMiner.Miners
 							if (reader.Depth < rewardDepth)
 							{
 								currentReward!.Amount = new Range<int>(currentRewardMin, currentRewardMax);
-								state = RewardParseState.InObject;
+								state = RewardParseState.InRewards;
 							}
 							break;
 						case RewardParseState.ExitObject:
@@ -448,6 +466,7 @@ namespace IcarusDataMiner.Miners
 			InRows,
 			InObject,
 			InRewards,
+			InReward,
 			ExitObject,
 			Done
 		}
@@ -903,7 +922,7 @@ namespace IcarusDataMiner.Miners
 				using (FileStream outStream = IOUtil.CreateFile(outputPath, logger))
 				using (StreamWriter writer = new StreamWriter(outStream))
 				{
-					writer.Write("Horde,Wave,Creatures,Total Count,Extra,Initial Delay,Spawn Amount,Spawn Interval");
+					writer.Write("Horde,Wave,Creatures,Total Count,Extra,Initial Delay,Amount Min,Amount Max,Interval Min,Interval Max");
 					for (int c = 0; c < NumCreatureCompletions; ++c)
 					{
 						writer.Write($",Level {c+1}");
@@ -917,7 +936,7 @@ namespace IcarusDataMiner.Miners
 							HordeWaveData wave = horde.Waves[waveNumber];
 							foreach (HordeCreatureData creature in wave.Creatures)
 							{
-								writer.Write($"{getDisplayName(horde)},{waveNumber + 1},{creature.Name},{creature.SpawnTotal},{creature.ExtraTotalPerPlayer},{creature.InitialDelay},{creature.SpawnAmount.ToExcelSafeString()},{creature.SpawnInterval.ToExcelSafeString()}");
+								writer.Write($"{getDisplayName(horde)},{waveNumber + 1},{creature.Name},{creature.SpawnTotal},{creature.ExtraTotalPerPlayer},{creature.InitialDelay},{creature.SpawnAmount.Min},{creature.SpawnAmount.Max},{creature.SpawnInterval.Min},{creature.SpawnInterval.Max}");
 
 								for (int c = 0; c < NumCreatureCompletions; ++c)
 								{
@@ -936,11 +955,24 @@ namespace IcarusDataMiner.Miners
 				using (FileStream outStream = IOUtil.CreateFile(outputPath, logger))
 				using (StreamWriter writer = new StreamWriter(outStream))
 				{
-					string?[] rewardNames = hordes.SelectMany(h => h.Rewards).Select(r => r.ItemDisplayName).Distinct().ToArray();
-					string?[] inertRewardNames = hordes.SelectMany(h => h.InertRewards).Select(r => r.ItemDisplayName).Distinct().ToArray();
+					HashSet<string> rewardNameSet = new();
+					foreach (string? name in hordes.SelectMany(h => h.Rewards).Select(r => r.ItemDisplayName))
+					{
+						if (name is not null) rewardNameSet.Add(name);
+					}
+					foreach (string? name in hordes.SelectMany(h => h.InertRewards).Select(r => r.ItemDisplayName))
+					{
+						if (name is not null) rewardNameSet.Add(name);
+					}
+					string[] rewardNames = rewardNameSet.ToArray();
 					IList<RewardData> noRewards = Array.Empty<RewardData>();
 
-					writer.WriteLine($"Horde,Completions,{string.Join(',', rewardNames)},{string.Join(',', inertRewardNames)}");
+					writer.Write($"Horde,Completions");
+					foreach (string rewardName in rewardNames)
+					{
+						writer.Write($",Min {rewardName},Max {rewardName}");
+					}
+					writer.WriteLine();
 
 					foreach (HordeData horde in hordes)
 					{
@@ -950,21 +982,29 @@ namespace IcarusDataMiner.Miners
 
 							float multiplier = (1.0f + completions * multipliers.RewardMultipliers.CompletionMultiplier) * multipliers.RewardMultipliers.DifficultyMultipliers[difficultyIndex];
 
-							Action<string?[], IList<RewardData>> writeRewards = new((names, data) =>
+							void writeRewards(string?[] names, IList<RewardData> data)
 							{
 								for (int rewardIndex = 0; rewardIndex < names.Length; ++rewardIndex)
 								{
 									RewardData? reward = data.FirstOrDefault(r => r.ItemDisplayName == names[rewardIndex]);
 									if (reward == null)
 									{
-										writer.Write(",");
+										writer.Write(",,");
 										continue;
 									}
 
 									Range<int> amount = reward.Amount * multiplier;
-									writer.Write($",{amount.ToExcelSafeString()}");
+									writer.Write($",{amount.Min},{amount.Max}");
 								}
-							});
+							}
+
+							// Based on logic in BP_Vapour_Condenser::GrantRewards, geysers are considered active (not inert) based on the following conditions:
+							// * The completion count is less than CompletionsBeforeInert (from D_Horde)
+							// AND
+							// * The prospect has bIsPersistent == false OR bIsOpenWorld == true
+							
+							// The above means that outpost geysers are always considered inert. The output ignores this case since outposts are a less played
+							// game mode, and also because at the time of this writing, the enzyme rewards are the same for active and inert geysers.
 
 							if (completions < horde.CompletionsBeforeInert)
 							{
@@ -972,11 +1012,8 @@ namespace IcarusDataMiner.Miners
 							}
 							else
 							{
-								writeRewards(rewardNames, noRewards);
+								writeRewards(rewardNames, horde.InertRewards);
 							}
-
-							// Always print inert rewards since outposts award them starting from the first round
-							writeRewards(inertRewardNames, horde.InertRewards);
 
 							writer.WriteLine();
 						}
@@ -1013,25 +1050,28 @@ namespace IcarusDataMiner.Miners
 
 			private readonly List<string> mInertRewardRowNames;
 
+			private readonly List<RewardData> mRewards;
+			private readonly List<RewardData> mInertRewards;
+
 			public string Name { get; set; }
 
 			public IList<HordeWaveData> Waves { get; }
 
 			public int CompletionsBeforeInert { get; set; }
 
-			public IList<RewardData> Rewards { get; }
+			public IList<RewardData> Rewards => mRewards;
 
-			public IList<RewardData> InertRewards { get; }
+			public IList<RewardData> InertRewards => mInertRewards;
 
 			public HordeData(string name)
 			{
-				mRewardRowNames = new List<string>();
-				mInertRewardRowNames = new List<string>();
+				mRewardRowNames = new();
+				mInertRewardRowNames = new();
+				mRewards = new();
+				mInertRewards = new();
 
 				Name = name;
 				Waves = new List<HordeWaveData>();
-				Rewards = new List<RewardData>();
-				InertRewards = new List<RewardData>();
 			}
 
 			public void AddRewardRow(string rowName)
@@ -1044,15 +1084,15 @@ namespace IcarusDataMiner.Miners
 				mInertRewardRowNames.Add(rowName);
 			}
 
-			public void ResolveRewards(IReadOnlyDictionary<string, RewardData> rewardMap)
+			public void ResolveRewards(IReadOnlyDictionary<string, IReadOnlyList<RewardData>> rewardMap)
 			{
 				foreach (string rowName in mRewardRowNames)
 				{
-					Rewards.Add(rewardMap[rowName]);
+					mRewards.AddRange(rewardMap[rowName]);
 				}
 				foreach (string rowName in mInertRewardRowNames)
 				{
-					InertRewards.Add(rewardMap[rowName]);
+					mInertRewards.AddRange(rewardMap[rowName]);
 				}
 			}
 
@@ -1259,10 +1299,13 @@ namespace IcarusDataMiner.Miners
 				return Min.Equals(Max) ? Min.ToString()! : $"{Min}-{Max}";
 			}
 
-			public string ToExcelSafeString()
-			{
-				return $"\"=\"\"{ToString()}\"\"\"";
-			}
+			// No longer used, but kept for reference because it is difficult to find any information on this obscure formatting
+			// which allows Excel to display a value like 3-7 without interpreting it as a date or formula.
+			// "=""value"""
+			//public string ToExcelSafeString()
+			//{
+			//	return $"\"=\"\"{ToString()}\"\"\"";
+			//}
 		}
 	}
 }
