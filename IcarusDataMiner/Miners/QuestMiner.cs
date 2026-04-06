@@ -55,15 +55,18 @@ namespace IcarusDataMiner.Miners
 					}
 
 					QuestData quest = QuestData.Create(prospect.Prospect);
-
-					ProcessQuest(quest, questsTable[mission.InitialQuest.RowName], questsTable, locationQueryData, iconQueryData, providerManager, logger);
 					foreach (FMissionObjectiveEntry subMission in mission.MissionObjectives)
 					{
 						FQuestSetup questSetup = questsTable[subMission.QuestRow.RowName];
 						QuestData subQuest = QuestData.Create(questSetup);
-						ProcessQuest(subQuest, questSetup, questsTable, locationQueryData, iconQueryData, providerManager, logger);
-						quest.SubQuests.Add(subQuest);
+						if (!quest.SubQuests.Contains(subQuest))
+						{
+							ProcessQuest(subQuest, questSetup, questsTable, locationQueryData, iconQueryData, providerManager, logger);
+							quest.SubQuests.Add(subQuest);
+						}
 					}
+					ProcessQuest(quest, questsTable[mission.InitialQuest.RowName], questsTable, locationQueryData, iconQueryData, providerManager, logger);
+
 					quests.Add(quest);
 				}
 				allQuests.AddRange(quests);
@@ -245,8 +248,11 @@ namespace IcarusDataMiner.Miners
 								if (questsTable.TryGetValue(nameOp.Operand, out FQuestSetup questSetup))
 								{
 									QuestData subQuest = QuestData.Create(questSetup);
-									ProcessQuest(subQuest, questSetup, questsTable, locationQueryData, iconQueryData, providerManager, logger);
-									quest.SubQuests.Add(subQuest);
+									if (!quest.SubQuests.Contains(subQuest))
+									{
+										ProcessQuest(subQuest, questSetup, questsTable, locationQueryData, iconQueryData, providerManager, logger);
+										quest.SubQuests.Add(subQuest);
+									}
 								}
 							}
 							else if (ffOp.Operand.Equals("IcarusQuestFunctionLibrary::GetQuestMarker"))
@@ -424,11 +430,7 @@ namespace IcarusDataMiner.Miners
 					IEnumerable<string> prebuilts = quest.GetAllPrebuiltStructures();
 					if (!prebuilts.Any()) continue;
 
-					string? name = null;
-					if (quest.Description is not null)
-					{
-						name = LocalizationUtil.GetLocalizedString(providerManager.AssetProvider, quest.Description);
-					}
+					string? name = LocalizationUtil.GetLocalizedString(providerManager.AssetProvider, quest.Description);
 
 					writer.WriteLine($"{quest.Name},{name},{string.Join('|', prebuilts)}");
 				}
@@ -443,9 +445,9 @@ namespace IcarusDataMiner.Miners
 
 		public static QuestData Unknown;
 
-		public string? Name { get; set; }
-		public string? Description { get; set; }
-		public List<QuestData> SubQuests { get; }
+		public string Name { get; }
+		public string Description { get; }
+		public HashSet<QuestData> SubQuests { get; }
 
 		public int PlayerSpawnGroup { get; set; }
 
@@ -478,24 +480,19 @@ namespace IcarusDataMiner.Miners
 				"StatContainer",
 				"ActorState"
 			};
-			Unknown = new("Unknown", "Unknown");
+			Unknown = new("Unknown", "One or more quests could not be located");
 		}
 
-		public QuestData()
+		public QuestData(string name, string description)
 		{
+			Name = name;
+			Description = description;
 			SubQuests = new();
 			Locations = new();
 			Icons = new();
 			SearchAreas = new();
 			PlayerSpawnGroup = -1;
 			PrebuiltStructures = new();
-		}
-
-		public QuestData(string name, string description)
-			: this()
-		{
-			Name = name;
-			Description = description;
 		}
 
 		public static QuestData Create(FIcarusProspect prospect)
@@ -534,14 +531,7 @@ namespace IcarusDataMiner.Miners
 			}
 
 			writer.WritePropertyName(nameof(Description));
-			if (Description is null)
-			{
-				writer.WriteNull();
-			}
-			else
-			{
-				writer.WriteValue(LocalizationUtil.GetLocalizedString(locProvider, Description));
-			}
+			writer.WriteValue(LocalizationUtil.GetLocalizedString(locProvider, Description));
 
 			if (PlayerSpawnGroup >= 0)
 			{
@@ -660,6 +650,16 @@ namespace IcarusDataMiner.Miners
 				writer.WriteEndArray();
 			}
 			writer.WriteEndObject();
+		}
+
+		public override int GetHashCode()
+		{
+			return Name.GetHashCode();
+		}
+
+		public override bool Equals(object? obj)
+		{
+			return obj is QuestData other && Name.Equals(other.Name);
 		}
 
 		public override string? ToString()
