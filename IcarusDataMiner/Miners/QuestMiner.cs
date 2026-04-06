@@ -73,6 +73,12 @@ namespace IcarusDataMiner.Miners
 
 				ExportQuestList(pair.Key, quests, providerManager, config, logger);
 			}
+
+			List<QuestData> commonQuests = new(ProcessCommonQuests(questsTable, locationQueryData, iconQueryData, providerManager, logger));
+			allQuests.AddRange(commonQuests);
+
+			ExportQuestList("Common", commonQuests, providerManager, config, logger, "Common quest blueprints that may be referenced by other quests.");
+
 			ExportPrebuiltStructures(allQuests, providerManager, config, logger);
 
 			return true;
@@ -343,6 +349,27 @@ namespace IcarusDataMiner.Miners
 			provider.ReadScriptData = wasReadScriptData;
 		}
 
+		private IEnumerable<QuestData> ProcessCommonQuests(IcarusDataTable<FQuestSetup> questsTable, QuestLocationQueryData locationQueryData, QuestIconQueryData iconQueryData, IProviderManager providerManager, Logger logger)
+		{
+			foreach (var pair in providerManager.AssetProvider.Files)
+			{
+				if (pair.Key.StartsWith("Icarus/Content/BP/Quests/Common/") ||
+					pair.Key.StartsWith("Icarus/Content/BP/Quests/Elysium/Story/Common/"))
+				{
+					if (!pair.Key.EndsWith(".uasset")) continue;
+
+					string questName = Path.GetFileNameWithoutExtension(pair.Key);
+					if (!questName.StartsWith("BPQ_")) continue;
+
+					questName = questName.Substring(4);
+					QuestData quest = new(questName, string.Empty);
+					ProcessQuestBlueprint(pair.Key, quest, questsTable, locationQueryData, iconQueryData, providerManager, logger);
+
+					yield return quest;
+				}
+			}
+		}
+
 		private static void AddQuestLocation(QuestData quest, string tableName, string rowName, QuestLocationQueryData locationQueryData, Logger logger)
 		{
 			if (rowName.Equals("None")) return;
@@ -392,7 +419,7 @@ namespace IcarusDataMiner.Miners
 			quest.PrebuiltStructures.Add(nameOp.Operand);
 		}
 
-		private void ExportQuestList(string treeName, IReadOnlyList<QuestData> quests, IProviderManager providerManager, Config config, Logger logger)
+		private void ExportQuestList(string treeName, IReadOnlyList<QuestData> quests, IProviderManager providerManager, Config config, Logger logger, string? fileComment = null)
 		{
 			string outputPath = Path.Combine(config.OutputDirectory, Name, $"{treeName}.json");
 
@@ -407,6 +434,11 @@ namespace IcarusDataMiner.Miners
 			})
 			{
 				json.WriteStartObject();
+				if (fileComment is not null)
+				{
+					json.WritePropertyName("Comment");
+					json.WriteValue(fileComment);
+				}
 				foreach (QuestData quest in quests.OrderBy(q => q.Name))
 				{
 					json.WritePropertyName(quest.Name!);
