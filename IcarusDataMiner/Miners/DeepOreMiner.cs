@@ -51,12 +51,15 @@ namespace IcarusDataMiner.Miners
 		{
 			Package mapPackage = (Package)providerManager.AssetProvider.LoadPackage(mapAsset);
 
-			int oreTypeNameIndex = -1, uraniumTypeNameIndex = -1, oilTypeNameIndex = -1, iceVariantIndex = -1, woodVariantIndex = -1, rootComponentIndex = -1, relativeLocationIndex = -1;
+			int oreTypeNameIndex = -1, fastOreTypeNameIndex = -1, uraniumTypeNameIndex = -1, oilTypeNameIndex = -1, iceVariantIndex = -1, woodVariantIndex = -1, rootComponentIndex = -1, relativeLocationIndex = -1;
 			for (int i = 0; i < mapPackage.NameMap.Length; ++i)
 			{
 				FNameEntrySerialized name = mapPackage.NameMap[i];
 				switch (name.Name)
 				{
+					case "BP_Deep_Mining_Ore_Deposit_High_Yeild_C":
+						fastOreTypeNameIndex = i;
+						break;
 					case "BP_DeepOreDepositSpawn_C":
 						oreTypeNameIndex = i;
 						break;
@@ -81,11 +84,15 @@ namespace IcarusDataMiner.Miners
 				}
 			}
 
-			int oreTypeClassIndex = -1, uraniumTypeClassIndex = -1, oilTypeClassIndex = -1;
+			int oreTypeClassIndex = -1, fastOreTypeClassIndex = -1, uraniumTypeClassIndex = -1, oilTypeClassIndex = -1;
 			for (int i = 0; i < mapPackage.ImportMap.Length; ++i)
 			{
 				FObjectImport import = mapPackage.ImportMap[i];
-				if (import.ObjectName.Index == oreTypeNameIndex)
+				if (import.ObjectName.Index == fastOreTypeNameIndex)
+				{
+					fastOreTypeClassIndex = ~i;
+				}
+				else if (import.ObjectName.Index == oreTypeNameIndex)
 				{
 					oreTypeClassIndex = ~i;
 				}
@@ -105,13 +112,15 @@ namespace IcarusDataMiner.Miners
 			{
 				if (export == null) continue;
 				if (export.ClassIndex.Index != oreTypeClassIndex &&
+					export.ClassIndex.Index != fastOreTypeClassIndex &&
 					export.ClassIndex.Index != uraniumTypeClassIndex &&
 					export.ClassIndex.Index != oilTypeClassIndex) continue;
 
 				DepositInfo deposit = new();
 				deposit.SetName(export.ObjectName);
-				deposit.Type = export.ClassIndex.Index == uraniumTypeClassIndex ? DepositType.Uranium
+				deposit.Type = export.ClassIndex.Index == fastOreTypeClassIndex ? DepositType.FastOre
 					: export.ClassIndex.Index == oilTypeClassIndex ? DepositType.Oil
+					: export.ClassIndex.Index == uraniumTypeClassIndex ? DepositType.Uranium
 					: DepositType.Ore;
 
 				UObject veinObject = export.ExportObject.Value;
@@ -181,6 +190,7 @@ namespace IcarusDataMiner.Miners
 					MapOverlayBuilder mapBuilder = MapOverlayBuilder.Create(worldData, providerManager.AssetProvider);
 
 					mapBuilder.AddLocations(oreDeposits.Where(o => o.Type == DepositType.Ore).Select(d => new MapLocation(d.Location, 7.0f)));
+					mapBuilder.AddLocations(oreDeposits.Where(o => o.Type == DepositType.FastOre).Select(d => new MapLocation(d.Location, 7.0f)), new SKColor(0, 255, 0, 255), MarkerShape.Circle);
 					mapBuilder.AddLocations(oreDeposits.Where(o => o.Type == DepositType.Ice).Select(d => new RotatedMapLocation(d.Location, 45.0f, 7.0f)), new SKColor(168, 160, 255, 255), MarkerShape.Square);
 					mapBuilder.AddLocations(oreDeposits.Where(o => o.Type == DepositType.Wood).Select(d => new MapLocation(d.Location, 7.0f)), new SKColor(225, 150, 100, 255), MarkerShape.Square);
 					mapBuilder.AddLocations(oreDeposits.Where(o => o.Type == DepositType.Uranium).Select(d => new MapLocation(d.Location, 7.0f)), new SKColor(192, 255, 128, 255));
@@ -267,6 +277,10 @@ namespace IcarusDataMiner.Miners
 				{
 					parseId(nameText["BP_DeepOreDepositSpawn".Length..]);
 				}
+				else if (nameText.StartsWith("BP_Deep_Mining_Ore_Deposit_High_Yeild"))
+				{
+					parseId(nameText["BP_Deep_Mining_Ore_Deposit_High_Yeild".Length..]);
+				}
 				else if (nameText.StartsWith("BP_Deep_Mining_Ice_Deposit"))
 				{
 					parseId(nameText["BP_Deep_Mining_Ice_Deposit".Length..]);
@@ -297,6 +311,7 @@ namespace IcarusDataMiner.Miners
 		{
 			Unknown,
 			Ore,
+			FastOre,
 			Ice,
 			Wood,
 			Uranium,
