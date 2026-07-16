@@ -55,6 +55,11 @@ namespace IcarusDataMiner
 			return new SKColor(LinearToSrgb(linearColor.Red * IntToFloat), LinearToSrgb(linearColor.Green * IntToFloat), LinearToSrgb(linearColor.Blue * IntToFloat), overrideAlpha);
 		}
 
+		public static FColor LinearColorToColor(FLinearColor linearColor)
+		{
+			return new FColor(LinearToSrgb(linearColor.R), LinearToSrgb(linearColor.G), LinearToSrgb(linearColor.B), (byte)(linearColor.A * FloatToInt));
+		}
+
 		public static byte LinearToSrgb(float linear)
 		{
 			if (linear <= 0.0f) return 0;
